@@ -129,3 +129,9 @@ func (m *MemFS) PushFile(localSrc, deviceDst string) error {
 	m.Pushed[clean(deviceDst)] = localSrc
 	return nil
 }
+
+// Has reports whether a file or dir exists (test helper).
+func (m *MemFS) Has(p string) bool {
+	p = clean(p)
+	return m.dirs[p] || func() bool { _, ok := m.files[p]; return ok }()
+}
