@@ -18,7 +18,7 @@ type FileOp struct {
 // Plan is the full set of operations for a push.
 type Plan struct {
 	SourceIsDir bool
-	ReplaceDir  string // device dir to RemoveAll before push ("" for single file)
+	ReplaceDirs []string // device dirs to RemoveAll before push (one per top-level source subdir; nil for single file)
 	Ops         []FileOp
 }
 
@@ -43,9 +43,21 @@ func PlanPush(source, userStylesDir string) (Plan, error) {
 		dev := deviceJoin(userStylesDir, filepath.Base(source))
 		return Plan{Ops: []FileOp{{Local: source, Device: dev}}}, nil
 	}
-	base := filepath.Base(strings.TrimRight(source, string(os.PathSeparator)))
-	replaceDir := deviceJoin(userStylesDir, base)
-	plan := Plan{SourceIsDir: true, ReplaceDir: replaceDir}
+
+	plan := Plan{SourceIsDir: true}
+
+	// Determine which top-level entries are subdirs — these become replace groups.
+	topEntries, err := os.ReadDir(source)
+	if err != nil {
+		return Plan{}, fmt.Errorf("reading source dir %q: %w", source, err)
+	}
+	for _, entry := range topEntries {
+		if entry.IsDir() {
+			plan.ReplaceDirs = append(plan.ReplaceDirs, deviceJoin(userStylesDir, entry.Name()))
+		}
+	}
+
+	// Walk all files and mirror them into userStyles (no basename wrapper).
 	err = filepath.WalkDir(source, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -58,7 +70,7 @@ func PlanPush(source, userStylesDir string) (Plan, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		plan.Ops = append(plan.Ops, FileOp{Local: p, Device: deviceJoin(replaceDir, rel)})
+		plan.Ops = append(plan.Ops, FileOp{Local: p, Device: deviceJoin(userStylesDir, rel)})
 		return nil
 	})
 	if err != nil {

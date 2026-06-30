@@ -50,9 +50,9 @@ func Execute(fs afcfs.FS, plan Plan, opts ExecOptions) error {
 	if !opts.Commit {
 		fmt.Fprintln(w, "DRY RUN (no changes will be made). Pass --commit to apply.")
 		fmt.Fprintf(w, "backup of %s -> %s\n", opts.UserStylesDir, opts.BackupDir)
-		if plan.ReplaceDir != "" {
-			if fi, err := fs.Stat(plan.ReplaceDir); err == nil && fi.IsDir {
-				fmt.Fprintf(w, "would REPLACE existing device dir: %s (RemoveAll then push)\n", plan.ReplaceDir)
+		for _, dir := range plan.ReplaceDirs {
+			if fi, err := fs.Stat(dir); err == nil && fi.IsDir {
+				fmt.Fprintf(w, "would REPLACE existing group: %s\n", dir)
 			}
 		}
 		for _, op := range plan.Ops {
@@ -67,11 +67,11 @@ func Execute(fs afcfs.FS, plan Plan, opts ExecOptions) error {
 		return fmt.Errorf("backup failed (aborting, nothing pushed): %w", err)
 	}
 
-	if plan.ReplaceDir != "" {
-		if fi, err := fs.Stat(plan.ReplaceDir); err == nil && fi.IsDir {
-			fmt.Fprintf(w, "replacing existing dir %s\n", plan.ReplaceDir)
-			if err := fs.RemoveAll(plan.ReplaceDir); err != nil {
-				return fmt.Errorf("remove existing %q: %w", plan.ReplaceDir, err)
+	for _, dir := range plan.ReplaceDirs {
+		if fi, err := fs.Stat(dir); err == nil && fi.IsDir {
+			fmt.Fprintf(w, "replacing existing group %s\n", dir)
+			if err := fs.RemoveAll(dir); err != nil {
+				return fmt.Errorf("remove existing %q: %w", dir, err)
 			}
 		}
 	}
