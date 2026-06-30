@@ -20,9 +20,10 @@ var vendCommands = []string{"VendDocuments", "VendContainer"}
 
 // Session is an open AFC connection to one app's container.
 type Session struct {
-	FS     afcfs.FS
-	Label  string
-	closer func() error
+	FS       afcfs.FS
+	Label    string
+	BundleID string // the bundle id that actually connected
+	closer   func() error
 }
 
 func (s *Session) Close() error {
@@ -77,21 +78,31 @@ func List() ([]Info, error) {
 }
 
 // Connect resolves the target device (empty udid -> first device) and opens a
-// house_arrest AFC client for bundleID.
-func Connect(udid, bundleID string) (*Session, error) {
+// house_arrest AFC client, trying each bundleID in order until one vends
+// successfully (Lightroom uses a different bundle id on iPhone vs iPad). The
+// Session records which bundle id connected. At least one bundleID is required.
+func Connect(udid string, bundleIDs ...string) (*Session, error) {
 	d, err := ios.GetDevice(udid)
 	if err != nil {
 		return nil, fmt.Errorf("resolve device: %w", err)
 	}
-	client, err := openHouseArrest(d, bundleID)
-	if err != nil {
-		return nil, err
+	if len(bundleIDs) == 0 {
+		return nil, fmt.Errorf("no bundle id provided")
 	}
-	return &Session{
-		FS:     afcfs.Wrap(client),
-		Label:  DescribeDevice(d),
-		closer: client.Close,
-	}, nil
+	var lastErr error
+	for _, bundleID := range bundleIDs {
+		client, err := openHouseArrest(d, bundleID)
+		if err == nil {
+			return &Session{
+				FS:       afcfs.Wrap(client),
+				Label:    DescribeDevice(d),
+				BundleID: bundleID,
+				closer:   client.Close,
+			}, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // openHouseArrest opens the house_arrest service and vends bundleID's container,

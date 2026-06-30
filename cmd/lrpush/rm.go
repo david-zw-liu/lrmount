@@ -42,12 +42,12 @@ func newRmCmd() *cobra.Command {
 			if commit || interactive {
 				fmt.Print(warningBanner())
 			}
-			sess, err := device.Connect(flagUDID, flagBundleID)
+			sess, err := device.Connect(flagUDID, bundleCandidates(cmd)...)
 			if err != nil {
 				return err
 			}
 			defer sess.Close()
-			fmt.Printf("device: %s   bundle: %s\n", sess.Label, flagBundleID)
+			fmt.Printf("device: %s   bundle: %s\n", sess.Label, sess.BundleID)
 
 			docsRoot, err := locate.DocumentsRoot(sess.FS, flagPathPrefix)
 			if err != nil {

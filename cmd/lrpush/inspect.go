@@ -38,12 +38,12 @@ func newInspectCmd() *cobra.Command {
 		Use:   "inspect",
 		Short: "Locate userStyles and list its first-level contents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sess, err := device.Connect(flagUDID, flagBundleID)
+			sess, err := device.Connect(flagUDID, bundleCandidates(cmd)...)
 			if err != nil {
 				return err
 			}
 			defer sess.Close()
-			fmt.Printf("device: %s   bundle: %s\n\n", sess.Label, flagBundleID)
+			fmt.Printf("device: %s   bundle: %s\n\n", sess.Label, sess.BundleID)
 			return inspect.Run(sess.FS, os.Stdout, inspect.Options{
 				PathPrefix:  flagPathPrefix,
 				CatalogFlag: catalog,
