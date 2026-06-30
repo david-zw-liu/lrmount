@@ -79,7 +79,7 @@ CLI 框架：**cobra + 子指令**。
 ### `lrpush push`
 主流程，**預設 `--dry-run`**，要 `--commit` 才實際寫入。
 - 旗標：
-  - `--source string`：本機來源，**可為單一檔案或資料夾**。資料夾則遞迴推所有檔案。
+  - `--source string`：本機來源，**可為單一檔案或資料夾**。資料夾則把其內容鏡射進 userStyles（見 §5）。
   - `--backup-dir string`：預設 `./_userStyles_backup/<timestamp>/`。
   - `--dry-run`（預設 true）/ `--commit`。
 - 行為見 §5。
@@ -90,27 +90,32 @@ CLI 框架：**cobra + 子指令**。
 - `--backup-dir string`：刪前先把目標 pull 到備份目錄（預設同 push 的備份位置慣例）。
 - 找不到的路徑：印 warning 並跳過該目標，不中斷其餘。
 
-## 5. push 合併語意（關鍵）
+## 5. push 語意（關鍵）
 
 定位 target：依 §6 找到 `userStyles`。
 
-**來源映射：**
-- 來源是資料夾 `./my-presets/`（結尾有無 `/` 皆同）→ 裝置端目標 = `userStyles/my-presets/`，底下**遞迴並保留子資料夾結構**（必要時 `MkDir` 建對應目錄）。
+**來源映射（contents-push，鏡射 source 頂層進 userStyles；不包 source basename 那層）：**
+- 來源是資料夾 `./source/`（結尾有無 `/` 皆同）→ 把 source 的**內容鏡射進 userStyles**：
+  - source 頂層每個**子資料夾** `A/`、`B/` → `userStyles/A/`、`userStyles/B/`，底下遞迴保留結構。
+  - source 頂層每個**零散檔** `xxx.xmp` → `userStyles/xxx.xmp`。
+  - 即每個檔 `source/<rel>` → 裝置 `userStyles/<rel>`（`<rel>` 為相對 source 的路徑，以 `/` 組裝）。
 - 來源是單一檔案 `foo.xmp` → 推到 `userStyles/foo.xmp`。
 
+> 此取代了舊版「包 source basename 一層」（`my-presets/` → `userStyles/my-presets/`）的設計。因裝置 userStyles 是扁平的一層 group 結構，鏡射頂層才能讓每個 group 直接落在 userStyles 下。
+
 **對既有內容的處理：**
-- userStyles 底下**其他**既有檔案/資料夾（Lightroom 自己的 preset）→ **永遠不碰，完全保留**。
-- 若**目標資料夾本身**已存在（例如 `userStyles/my-presets` 已在）→ **先 `RemoveAll` 整個刪掉舊資料夾，再整包 push 新的**（wholesale replace，不做逐檔合併，舊檔不殘留）。此為使用者明確選擇；刪前已有備份。
-- 單一檔案目標若同名已存在 → 直接覆寫。
-- 來源資料夾底下所有檔案一律推；單檔則直接推該檔。
+- userStyles 底下**其他**既有檔案/資料夾（source 沒有的、Lightroom 自己的 preset）→ **永遠不碰，完全保留**。
+- source 頂層**每個子資料夾**對應的 `userStyles/<name>` 若已存在 → **先 `RemoveAll` 整個刪掉舊 group，再整包 push 新的**（per-group wholesale replace，不逐檔合併，舊檔不殘留）。使用者明確選擇；刪前已備份。
+- source 頂層**零散檔**對應的 `userStyles/<file>` 若同名已存在 → 直接覆寫。
+- 單一檔案來源若同名已存在 → 直接覆寫。
 
 **順序（commit 模式）：**
 1. 印警告橫幅（見 §8）。
 2. 把**整個 userStyles** pull 到 `--backup-dir`。
-3. 若目標資料夾已存在 → `RemoveAll`。
-4. 遞迴 `MkDir` + `Push`，逐檔印結果（OK/skip/fail）。
+3. 對每個「要取代的頂層子資料夾」`userStyles/<name>`，若已存在 → `RemoveAll`（全部刪完再進下一步，避免被緊接的 push 重建後又被刪）。
+4. 逐檔遞迴 `MkDir` 父目錄 + `PushFile`，逐檔印結果（OK/fail）。
 
-dry-run 模式：只印「選到的 target、會備份哪些、目標資料夾是否會被整個取代、會推哪些檔（含對應裝置路徑）」，完全不寫入、不刪除、不備份。
+dry-run 模式：只印「選到的 target、會備份整個 userStyles、會被整個取代的頂層 group 清單、會推哪些檔（含對應裝置路徑）」，完全不寫入、不刪除、不備份。
 
 ## 6. 路徑選擇邏輯
 
