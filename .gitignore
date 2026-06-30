@@ -1,0 +1,9 @@
+# Backup output: keep the folder in git (via .keep), ignore its contents
+/_userStyles_backup/*
+!/_userStyles_backup/.keep
+
+# inspect samples (pulled from device)
+/_inspect_sample/
+
+# built binary
+/lrpush
