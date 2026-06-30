@@ -28,6 +28,21 @@ go-ios v1.2.0（`go get @latest` 取得）的 `afc.FileInfo` 只有 `Name / Type
 
 → **後果：原 spec「依資料夾 mtime 取最新」無法用 stock library 達成。** 改用 §6 的選路策略。
 
+### 實機調查結果（2026-06-30，iPad16,1 / iPadOS 27.0 / com.adobe.lrmobile）
+
+實機跑 inspect 與診斷後確認以下事實（取代上面兩個「未知數」的假設）：
+
+1. **必須用 `VendDocuments`，不能用 `VendContainer`。**
+   go-ios 的 `house_arrest.New` 送的是 `VendContainer`，本機回 `InstallationLookupFailed`（即使 `installationproxy` 確認 app 已安裝、`UIFileSharingEnabled=true`）。改送 `VendDocuments` → `Status=Complete`，AFC 可用。
+   → **device 層不能直接用 `house_arrest.New`**，要自己送 `VendDocuments`（可保留 `VendContainer` 當 fallback），再 `afc.NewFromConn`。go-ios 的 `ios.ConnectToService` / `ios.NewPlistCodec` / `afc.NewFromConn` 皆已匯出，可自行組。
+2. **AFC root 無法直接列。** `List("")` / `List("/")` / `List(".")` 全回 afc error code 10（NOT FOUND），只有具名子目錄（如 `List("Documents")`）可列。
+   → 原 `DocumentsRoot` 用 `fs.List("")` 偵測前綴的做法**失效**。改為：預設前綴 `Documents`（用 `List("Documents")` 探測確認），`--path-prefix` 仍可覆寫。
+3. **真實 target：** `Documents/0355bf64576a4f8da2aef4d5e2746bba/settings-acr/userStyles/`。`settings-acr` 下還有 `userPrefs/`（RawDefaults.xmp、FavoriteStyles.xmp）。
+4. **userStyles 不是平的**：底下是**多個 preset 群組子資料夾**（如 `C4-英泽君经典富士Vivid250D/`，共 13 個），每個資料夾內是一堆 `.xmp`。→ 證實「保留來源資料夾層級」的設計正確。
+5. **preset 檔是標準 Adobe XMP**（`.xmp`、純文字，每檔含 `crs:PresetType` / `crs:UUID` / `crs:Cluster`）。
+6. **⚠️ userStyles 根有一個 `Index.dat`（約 505 KB，二進位）**：版本(4B) + 數量(4B) + 重複 [長度(4B)][路徑字串] 結構，列出所有 preset 的相對路徑（含內建 `AppBundle-FolderPlaceHolder/Adobe/Presets/...`）。
+   → **關鍵風險：Lightroom 很可能讀 Index.dat 來決定有哪些 preset。** 只丟新 `.xmp` 資料夾、不動 Index.dat，presets 可能不會出現。可能策略：(a) push 後**刪掉 Index.dat** 逼 Lightroom 重建（待實測）；(b) 解析並改寫 Index.dat（最穩、工最多）；(c) 只 push、實測 Lightroom 是否會自動掃描重建。**此點需實測決定，影響 push 設計（§5）。**
+
 ## 3. 架構
 
 ```
