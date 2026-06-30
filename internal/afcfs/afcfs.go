@@ -3,7 +3,6 @@
 package afcfs
 
 import (
-	"io"
 	"os"
 
 	"github.com/danielpaulus/go-ios/ios/afc"
@@ -56,6 +55,5 @@ func (f *clientFS) PushFile(localSrc, deviceDst string) error {
 		return err
 	}
 	defer in.Close()
-	var r io.Reader = in
-	return f.c.WriteToFile(r, deviceDst)
+	return f.c.WriteToFile(in, deviceDst)
 }
