@@ -14,6 +14,10 @@ import (
 	"github.com/davidliu/lrpush/internal/locate"
 )
 
+// stdinReader is shared so successive prompts don't lose bytes to a fresh
+// bufio.Reader's read-ahead buffer (terminalPicker is reused by push/rm).
+var stdinReader = bufio.NewReader(os.Stdin)
+
 // terminalPicker prints a numbered menu and reads a choice from stdin.
 func terminalPicker(cands []locate.Catalog) (int, error) {
 	fmt.Println("Multiple catalogs found:")
@@ -21,7 +25,7 @@ func terminalPicker(cands []locate.Catalog) (int, error) {
 		fmt.Printf("  [%d] %s (userStyles files: %d)\n", i, c.Name, c.PresetCount)
 	}
 	fmt.Print("Select catalog number: ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	line, err := stdinReader.ReadString('\n')
 	if err != nil {
 		return -1, err
 	}

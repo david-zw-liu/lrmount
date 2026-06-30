@@ -5,6 +5,7 @@ package inspect
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -92,6 +93,10 @@ func Run(fs afcfs.FS, w io.Writer, opts Options) error {
 		entries, err := fs.List(chosen.UserStyles)
 		if err != nil {
 			fmt.Fprintf(w, "could not list userStyles for sampling: %v\n", err)
+			return nil
+		}
+		if err := os.MkdirAll(opts.SampleDir, 0o755); err != nil {
+			fmt.Fprintf(w, "could not create sample dir %s: %v\n", opts.SampleDir, err)
 			return nil
 		}
 		pulled := 0
