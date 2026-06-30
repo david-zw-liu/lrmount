@@ -47,26 +47,40 @@ you can confirm the real file extension/format.
 
 ### 2. Push (dry-run, then commit)
 
-A folder keeps its own name as a subfolder under userStyles
-(`./my-presets/` -> `userStyles/my-presets/...`, structure preserved). If that
-target subfolder already exists it is replaced wholesale (old folder removed,
-backed up first). Other existing userStyles content is left untouched.
+A folder's **contents** are mirrored into userStyles (the source folder name is
+NOT added as a wrapper level). Each top-level subfolder becomes a preset group
+directly under userStyles, and top-level loose files land directly in userStyles:
+
+    ./source/A/        -> userStyles/A/
+    ./source/B/        -> userStyles/B/
+    ./source/xxx.xmp   -> userStyles/xxx.xmp
+
+Each top-level subfolder that already exists on the device is replaced wholesale
+(old group removed, backed up first); loose files overwrite. Any existing
+userStyles content the source does not mention is left untouched. The whole
+userStyles is backed up before any change.
 
     # preview
-    ./lrpush push --source ./my-presets
+    ./lrpush push --source ./source
     # apply
-    ./lrpush push --source ./my-presets --commit
+    ./lrpush push --source ./source --commit
 
-Single file:
+Single file (lands at `userStyles/foo.xmp`):
 
     ./lrpush push --source ./foo.xmp --commit
 
 ### 3. Remove
 
-Paths are relative to userStyles; multiple allowed; files or folders.
+Paths are relative to userStyles; multiple allowed; files or folders. Paths that
+escape userStyles (`..`, absolute, `.`) are refused.
 
     ./lrpush rm my-presets foo.xmp            # dry-run
     ./lrpush rm my-presets foo.xmp --commit   # apply (backs up first)
+
+Interactive multi-select (pick from userStyles' first-level entries, confirm,
+then back up + delete — no `--commit` needed, the confirmation is the gate):
+
+    ./lrpush rm -i
 
 ## Troubleshooting
 
@@ -91,4 +105,8 @@ Presets pushed this way may not sync to Creative Cloud.
 - `--path-prefix` — override AFC root prefix if auto-detection is wrong
 - `--catalog` — pick catalog by name (non-interactive; otherwise a menu appears
   when multiple catalogs exist)
+- `--source` — (push) local file or folder; a folder's contents are mirrored
+  into userStyles
+- `-i`, `--interactive` — (rm) pick targets from a multi-select menu, confirm,
+  then back up + delete
 - `--backup-dir`, `--commit` — see Safety
