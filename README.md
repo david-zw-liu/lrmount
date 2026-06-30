@@ -16,7 +16,8 @@ container over USB and copies presets in.
   Computer" on the phone; unlock once so the pairing is valid).
 - Go 1.26+ to build.
 - Dependencies (Go modules): `github.com/danielpaulus/go-ios`,
-  `github.com/spf13/cobra`.
+  `github.com/spf13/cobra`, `github.com/charmbracelet/huh` (rm -i menu),
+  `golang.org/x/term`.
 
 ## Build
 
@@ -37,7 +38,15 @@ Other targets: `make test`, `make vet`, `make fmt`, `make clean`.
 
 ## Workflow
 
-### 1. Inspect (run this first)
+### 0. List devices (when more than one is attached)
+
+    ./lrpush devices
+
+Prints each connected device's udid, name, model, and iOS version. Use a udid
+with `--udid` to target a specific device (the default "first device" is
+non-deterministic when several are attached).
+
+### 1. Inspect
 
     ./lrpush inspect
 
@@ -84,9 +93,8 @@ then back up + delete — no `--commit` needed, the confirmation is the gate):
 ## Troubleshooting
 
 **Multiple devices connected:** `lrpush` uses the first USB device by default,
-which is non-deterministic when several are attached. Pass `--udid <udid>` to
-target a specific one. You can find udids by running `inspect` per device, or
-via Apple's tooling.
+which is non-deterministic when several are attached. Run `lrpush devices` to
+list udids, then pass `--udid <udid>` to target a specific one.
 
 **`InstallationLookupFailed` / lockdown errors:** make sure the device is
 unlocked and trusted (accept the "Trust This Computer" prompt). `lrpush` opens

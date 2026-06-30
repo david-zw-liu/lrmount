@@ -68,6 +68,9 @@ CLI 框架：**cobra + 子指令**。
 - `--bundle-id string`：預設 `com.adobe.lrmobile`。
 - `--path-prefix string`：覆寫 AFC root 前綴（自動偵測失敗時用）。
 
+### `lrpush devices`
+列出所有連接的 USB 裝置（依 udid 去重，usbmuxd 可能同一台報多個 transport），每台印 udid、名稱、機型、iOS 版本；lockdown 讀值失敗（如裝置鎖定）則印錯誤但不漏列。用來在多裝置時挑 `--udid`。
+
 ### `lrpush inspect`
 調查指令，可重複跑，也是 push/rm 在定位 target 時的共用邏輯來源。
 - 偵測 AFC root 前綴（見 §6）、列出含 `settings-acr` 的 catalog 候選並選定。
@@ -159,5 +162,9 @@ dry-run 模式：只印「選到的 target、會備份整個 userStyles、會被
 
 ## 11. 相依
 
-- `github.com/danielpaulus/go-ios`
-- `github.com/spf13/cobra`
+- `github.com/danielpaulus/go-ios`（USB / AFC / house_arrest / lockdown）
+- `github.com/spf13/cobra`（CLI 子指令）
+- `github.com/charmbracelet/huh`（`rm -i` 方向鍵多選 TUI）
+- `golang.org/x/term`（偵測是否為 TTY，決定走 TUI 或數字 fallback）
+
+> 原本「只用兩個直接相依」的限制，因使用者要求 `rm -i` 做成方向鍵多選 TUI 而放寬：新增 huh + x/term。非 TTY（管道/腳本）時 `rm -i` 自動退回數字選取，不依賴 TUI。
