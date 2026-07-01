@@ -1,40 +1,146 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sync"
 
-var (
-	flagUDID       string
-	flagBundleID   string
-	flagPathPrefix string
+	"github.com/spf13/cobra"
+
+	"github.com/davidliu/lrpush/internal/device"
+	"github.com/davidliu/lrpush/internal/locate"
+	"github.com/davidliu/lrpush/internal/mirror"
 )
 
-// lightroomBundleIDs are tried in order when --bundle-id is not set explicitly.
-// Lightroom mobile uses a different bundle id on iPhone vs iPad/universal.
-var lightroomBundleIDs = []string{"com.adobe.lrmobile", "com.adobe.lrmobilephone"}
-
-// bundleCandidates returns the bundle id(s) to try: the explicit --bundle-id if
-// the user set it, otherwise the known Lightroom ids for auto-detection.
-func bundleCandidates(cmd *cobra.Command) []string {
-	if cmd.Flags().Changed("bundle-id") {
-		return []string{flagBundleID}
-	}
-	return lightroomBundleIDs
-}
+// lightroomBundleIDs are probed in order; the iPhone app comes first.
+var lightroomBundleIDs = []string{"com.adobe.lrmobilephone", "com.adobe.lrmobile"}
 
 var rootCmd = &cobra.Command{
 	Use:           "lrpush",
-	Short:         "Push Lightroom presets to an iPhone's Lightroom mobile app over USB",
+	Short:         "Mirror an iPhone/iPad Lightroom app's userStyles to ./sync and live-sync edits back",
 	SilenceUsage:  true,
 	SilenceErrors: true,
-}
-
-func init() {
-	pf := rootCmd.PersistentFlags()
-	pf.StringVar(&flagUDID, "udid", "", "target device udid (default: first USB device)")
-	pf.StringVar(&flagBundleID, "bundle-id", "com.adobe.lrmobile", "app bundle id (if unset, auto-tries com.adobe.lrmobile and com.adobe.lrmobilephone)")
-	pf.StringVar(&flagPathPrefix, "path-prefix", "", "override AFC root prefix (e.g. Documents)")
-
-	rootCmd.AddCommand(newDevicesCmd(), newInspectCmd(), newPushCmd(), newRmCmd())
+	RunE:          func(cmd *cobra.Command, args []string) error { return run() },
 }
 
 func Execute() error { return rootCmd.Execute() }
+
+// prefixLogger returns a logger that tags each line with the bundle id when
+// more than one app is being mirrored concurrently.
+func prefixLogger(bundleID string, multi bool) func(string) {
+	return func(s string) {
+		if multi {
+			fmt.Printf("[%s] %s\n", bundleID, s)
+		} else {
+			fmt.Println(s)
+		}
+	}
+}
+
+type appMirror struct {
+	sess       *device.Session
+	userStyles string
+	localDir   string
+}
+
+func run() error {
+	// 1. Pick device.
+	infos, err := device.List()
+	if err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		return fmt.Errorf("no USB device found; connect and trust your device")
+	}
+	chosen := infos[0]
+	if len(infos) > 1 {
+		labels := make([]string, len(infos))
+		for i, d := range infos {
+			labels[i] = fmt.Sprintf("%s  (%s, iOS %s, %s)", d.Name, d.ProductType, d.Version, d.UDID)
+		}
+		idx, err := pickIndex("Select a device", labels)
+		if err != nil {
+			return err
+		}
+		chosen = infos[idx]
+	}
+
+	// 2. Detect every installed Lightroom app.
+	sessions, err := device.DetectSessions(chosen.UDID, lightroomBundleIDs)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, s := range sessions {
+			s.Close()
+		}
+	}()
+
+	// 3. Per-app: locate userStyles + choose catalog + compute local dir.
+	var mirrors []appMirror
+	for _, s := range sessions {
+		docs, err := locate.DocumentsRoot(s.FS, "")
+		if err != nil {
+			return fmt.Errorf("[%s] %w", s.BundleID, err)
+		}
+		cands, err := locate.FindCatalogs(s.FS, docs)
+		if err != nil {
+			return fmt.Errorf("[%s] %w", s.BundleID, err)
+		}
+		cat, err := locate.SelectCatalog(cands, "", catalogPicker)
+		if err != nil {
+			return fmt.Errorf("[%s] %w", s.BundleID, err)
+		}
+		mirrors = append(mirrors, appMirror{
+			sess:       s,
+			userStyles: cat.UserStyles,
+			localDir:   filepath.Join("sync", s.BundleID, "userStyles"),
+		})
+	}
+	multi := len(mirrors) > 1
+
+	// 4. Wipe ./sync then pull-replace each app.
+	if err := os.RemoveAll("sync"); err != nil {
+		return fmt.Errorf("clear ./sync: %w", err)
+	}
+	for _, m := range mirrors {
+		log := prefixLogger(m.sess.BundleID, multi)
+		if err := mirror.PullReplace(m.sess.FS, m.userStyles, m.localDir, log); err != nil {
+			return fmt.Errorf("[%s] initial pull: %w", m.sess.BundleID, err)
+		}
+	}
+
+	// 5. Warn once, then print absolute watch paths.
+	fmt.Print(warningBanner())
+	for _, m := range mirrors {
+		abs, _ := filepath.Abs(m.localDir)
+		fmt.Printf("editing → %s  (watching for changes; Ctrl-C to stop)\n", abs)
+	}
+
+	// 6. Start a watcher per app; run until Ctrl-C.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	var wg sync.WaitGroup
+	for _, m := range mirrors {
+		w, err := mirror.NewWatcher(m.sess.FS, m.localDir, m.userStyles, prefixLogger(m.sess.BundleID, multi))
+		if err != nil {
+			return err
+		}
+		wg.Add(1)
+		go func(w *mirror.Watcher, bundle string) {
+			defer wg.Done()
+			if err := w.Run(ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] watcher error: %v\n", bundle, err)
+			}
+		}(w, m.sess.BundleID)
+	}
+	<-ctx.Done()
+	wg.Wait()
+
+	// 7. Closing reminder.
+	fmt.Println("\nStopped. Reopen Lightroom so it rebuilds its preset index.")
+	return nil
+}

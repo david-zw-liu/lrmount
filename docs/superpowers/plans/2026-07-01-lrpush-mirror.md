@@ -204,10 +204,14 @@ git commit -m "$(printf 'feat(mirror): PullReplace mirrors device userStyles to 
 - Modify: `internal/mirror/mirror_test.go`
 
 **Interfaces:**
-- Consumes: `afcfs.FS`, `deviceJoinRel` (Task 1).
+- Consumes: `afcfs.FS`, `deviceJoinRel` (Task 1), `safeRel` (already defined in Task 1's `mirror.go` — do NOT redefine it; just use it).
 - Produces:
   - `func Reconcile(fs afcfs.FS, localDir, deviceUserStyles string, changed []string, log func(string)) error`
-  - `func safeRel(rel string) (string, error)` — cleans a slash/native rel path; error if it escapes (`..`, absolute, empty).
+  - `func pushDir(...)`, `func deviceMkdirAll(...)` (unexported helpers).
+
+Note: `safeRel` was implemented in Task 1. This task adds its test
+(`TestSafeRelRejectsEscapes`) and consumes it, but must NOT define it again
+(duplicate definition = compile error).
 
 Behaviour of `Reconcile` for each `changed` rel path:
 - local path missing → `fs.RemoveAll(devicePath)` (mirror the deletion).
@@ -318,22 +322,12 @@ Expected: FAIL — `undefined: Reconcile`, `undefined: safeRel`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `internal/mirror/mirror.go` (add `"errors"`, `"fmt"`, `"io/fs"` as `iofs`, `"strings"` to imports):
+Append to `internal/mirror/mirror.go` (add `"errors"` and `"io/fs"` as `iofs`
+to imports; `fmt`, `path`, `path/filepath`, `strings`, `os` are already
+imported from Task 1). Do NOT redefine `safeRel` — it already exists from Task 1
+and its behavior already satisfies `TestSafeRelRejectsEscapes`.
 
 ```go
-// safeRel normalises a relative path and rejects anything that escapes the
-// mirror root (empty, ".", absolute, or containing a leading "..").
-func safeRel(rel string) (string, error) {
-	c := path.Clean(filepath.ToSlash(rel))
-	if c == "" || c == "." {
-		return "", fmt.Errorf("empty path")
-	}
-	if path.IsAbs(c) || c == ".." || strings.HasPrefix(c, "../") {
-		return "", fmt.Errorf("path escapes userStyles: %q", rel)
-	}
-	return c, nil
-}
-
 // deviceMkdirAll makes a device directory; afcfs.MkDir is already mkdir-p.
 func deviceMkdirAll(fs afcfs.FS, dir string) error { return fs.MkDir(dir) }
 
