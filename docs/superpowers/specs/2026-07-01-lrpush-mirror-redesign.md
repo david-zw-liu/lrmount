@@ -10,14 +10,16 @@ with a single, flagless flow. Running bare `./lrpush`:
 1. Picks a connected device.
 2. Detects every installed Lightroom app on it.
 3. For each app, mirrors the device's `userStyles` down into a local folder
-   `./devices/{udid}/{bundle-id}/userStyles/` (pull-and-replace).
+   `./sync/{bundle-id}/userStyles/` (pull-and-replace).
 4. Warns the user to close Lightroom, then watches each local folder and
    auto-pushes any change back up to the device in real time (including
    deletions), until the user hits Ctrl-C.
+5. On exit, deletes everything under `./sync/`.
 
-The local folder becomes the working copy: edit presets there and they land on
-the device. Direction is never ambiguous — **device → local at startup, local →
-device during the session** — so there is no conflict resolution.
+The local folder is an ephemeral working copy: edit presets there and they land
+on the device, but nothing persists between runs (`./sync/` is cleared on both
+startup and exit). Direction is never ambiguous — **device → local at startup,
+local → device during the session** — so there is no conflict resolution.
 
 ## Non-goals
 
@@ -53,7 +55,8 @@ intersect with the known Lightroom bundle ids, probed in this precedence order:
 - ≥1 installed → **mirror every one of them.** Each installed app becomes an
   independent mirror session with its own local root and its own watcher, all
   running concurrently. Because each app's local tree is namespaced by bundle
-  id, there is no collision and therefore no bundle picker.
+  id (`./sync/{bundle-id}/`), there is no collision and therefore no bundle
+  picker.
 
 In the common case exactly one Lightroom app is installed, so this degenerates
 to a single session.
@@ -66,16 +69,17 @@ For each installed Lightroom app:
    → `locate.SelectCatalog`.
    - 1 catalog → auto-select.
    - >1 → arrow-key picker.
-3. Compute the local root: `./devices/{udid}/{bundle-id}/userStyles/`.
+3. Compute the local root: `./sync/{bundle-id}/userStyles/`.
 
 Catalog pickers (if any) are resolved up front, before any watcher starts, so
 the interactive phase is over before mirroring begins.
 
 ### 4. Pull-and-replace (device → local)
-For each app's local root:
+First, remove `./sync/` entirely (clearing any leftovers from a prior crashed
+run). Then, for each app's local root:
 
-1. Remove the local `userStyles` directory if it exists.
-2. Recreate it and recursively pull the entire device `userStyles` tree into it.
+1. Create `./sync/{bundle-id}/userStyles/`.
+2. Recursively pull the entire device `userStyles` tree into it.
 3. Log per file.
 
 The device is never written during this phase. A pull failure aborts that
@@ -106,8 +110,10 @@ fsnotify stays at the edge (collect paths + debounce only). The device-mutating
 logic lives entirely in `Reconcile`, which is unit-testable without fsnotify.
 
 ### 7. Shutdown
-Run until Ctrl-C (SIGINT). On signal, stop all watchers and close all AFC
-sessions cleanly.
+Run until Ctrl-C (SIGINT). On signal, stop all watchers, close all AFC sessions
+cleanly, then delete everything under `./sync/`. The cleanup runs on normal exit
+paths (signal or fatal error after mirroring started); a hard crash is covered
+by the startup wipe in step 4.
 
 ## Error handling
 
@@ -149,14 +155,14 @@ sessions cleanly.
 ## Local folder layout
 
 ```
-./devices/
-  {udid}/
-    {bundle-id}/
-      userStyles/
-        <preset groups and loose files, mirrored from the device>
+./sync/                         (wiped on startup and on exit)
+  {bundle-id}/
+    userStyles/
+      <preset groups and loose files, mirrored from the device>
 ```
 
-`.gitignore` adds `/devices/`.
+`.gitignore` adds `/sync/` (defensive — the folder should not survive a normal
+run, but a crash could leave it behind).
 
 ## Testing
 
@@ -172,6 +178,6 @@ sessions cleanly.
 ## Rationale for the removed subcommands
 
 `inspect` (listing) is subsumed by the local folder itself — after startup you
-just look at `./devices/{udid}/{bundle-id}/userStyles/`. `push`/`rm` are
+just look at `./sync/{bundle-id}/userStyles/`. `push`/`rm` are
 subsumed by editing that folder while the watcher runs. `devices` is subsumed by
 the startup device picker. Git history preserves the removed code.
