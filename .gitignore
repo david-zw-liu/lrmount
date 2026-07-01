@@ -1,6 +1,5 @@
-# Backup output: keep the folder in git (via .keep), ignore its contents
-/_userStyles_backup/*
-!/_userStyles_backup/.keep
+# Ephemeral local mirror (wiped at the start of every run)
+/sync/
 
 # built binary
 /lrpush
