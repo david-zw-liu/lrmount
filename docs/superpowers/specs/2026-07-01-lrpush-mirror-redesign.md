@@ -14,12 +14,13 @@ with a single, flagless flow. Running bare `./lrpush`:
 4. Warns the user to close Lightroom, then watches each local folder and
    auto-pushes any change back up to the device in real time (including
    deletions), until the user hits Ctrl-C.
-5. On exit, deletes everything under `./sync/`.
 
 The local folder is an ephemeral working copy: edit presets there and they land
-on the device, but nothing persists between runs (`./sync/` is cleared on both
-startup and exit). Direction is never ambiguous — **device → local at startup,
-local → device during the session** — so there is no conflict resolution.
+on the device. Nothing carries over between runs — `./sync/` is wiped at the
+start of every run, so each session begins from a fresh device pull. (It is not
+deleted on exit; it lingers on disk for inspection until the next startup wipe.)
+Direction is never ambiguous — **device → local at startup, local → device
+during the session** — so there is no conflict resolution.
 
 ## Non-goals
 
@@ -110,10 +111,10 @@ fsnotify stays at the edge (collect paths + debounce only). The device-mutating
 logic lives entirely in `Reconcile`, which is unit-testable without fsnotify.
 
 ### 7. Shutdown
-Run until Ctrl-C (SIGINT). On signal, stop all watchers, close all AFC sessions
-cleanly, then delete everything under `./sync/`. The cleanup runs on normal exit
-paths (signal or fatal error after mirroring started); a hard crash is covered
-by the startup wipe in step 4.
+Run until Ctrl-C (SIGINT). On signal, stop all watchers and close all AFC
+sessions cleanly. `./sync/` is **not** deleted on exit — it is left on disk and
+wiped at the start of the next run (step 4), so no exit-time cleanup or
+signal-handler teardown of the local tree is needed.
 
 ## Error handling
 
@@ -155,7 +156,7 @@ by the startup wipe in step 4.
 ## Local folder layout
 
 ```
-./sync/                         (wiped on startup and on exit)
+./sync/                         (wiped at the start of every run)
   {bundle-id}/
     userStyles/
       <preset groups and loose files, mirrored from the device>
