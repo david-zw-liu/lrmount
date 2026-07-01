@@ -3,7 +3,9 @@
 package mirror
 
 import (
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -45,6 +47,84 @@ func PullReplace(fs afcfs.FS, deviceUserStyles, localDir string, log func(string
 		return err
 	}
 	return pullTree(fs, deviceUserStyles, localDir, "", log)
+}
+
+// deviceMkdirAll makes a device directory; afcfs.MkDir is already mkdir-p.
+func deviceMkdirAll(fs afcfs.FS, dir string) error { return fs.MkDir(dir) }
+
+// Reconcile applies a set of changed local relative paths to the device:
+// missing local path -> RemoveAll on device; file -> PushFile; dir -> push all
+// files under it. Per-path errors and refused (escaping) paths are logged and
+// skipped so the session survives; Reconcile returns nil.
+func Reconcile(fs afcfs.FS, localDir, deviceUserStyles string, changed []string, log func(string)) error {
+	for _, raw := range changed {
+		rel, err := safeRel(raw)
+		if err != nil {
+			log("skip " + err.Error())
+			continue
+		}
+		localPath := filepath.Join(localDir, filepath.FromSlash(rel))
+		devPath := deviceJoinRel(deviceUserStyles, rel)
+
+		fi, statErr := os.Stat(localPath)
+		if errors.Is(statErr, os.ErrNotExist) {
+			if err := fs.RemoveAll(devPath); err != nil {
+				log("delete failed " + rel + ": " + err.Error())
+				continue
+			}
+			log("deleted " + rel)
+			continue
+		}
+		if statErr != nil {
+			log("stat failed " + rel + ": " + statErr.Error())
+			continue
+		}
+		if fi.IsDir() {
+			if err := pushDir(fs, localPath, devPath, log); err != nil {
+				log("push dir failed " + rel + ": " + err.Error())
+			}
+			continue
+		}
+		if err := deviceMkdirAll(fs, path.Dir(devPath)); err != nil {
+			log("mkdir failed " + rel + ": " + err.Error())
+			continue
+		}
+		if err := fs.PushFile(localPath, devPath); err != nil {
+			log("push failed " + rel + ": " + err.Error())
+			continue
+		}
+		log("pushed " + rel)
+	}
+	return nil
+}
+
+// pushDir mkdir-p's deviceDir and pushes every file under localDir into it.
+func pushDir(fs afcfs.FS, localDir, deviceDir string, log func(string)) error {
+	if err := deviceMkdirAll(fs, deviceDir); err != nil {
+		return err
+	}
+	return filepath.WalkDir(localDir, func(p string, d iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(localDir, p)
+		if err != nil {
+			return err
+		}
+		relSlash := filepath.ToSlash(rel)
+		dev := deviceDir
+		if relSlash != "." {
+			dev = deviceDir + "/" + relSlash
+		}
+		if d.IsDir() {
+			return deviceMkdirAll(fs, dev)
+		}
+		if err := fs.PushFile(p, dev); err != nil {
+			return err
+		}
+		log("pushed " + relSlash)
+		return nil
+	})
 }
 
 func pullTree(fs afcfs.FS, deviceRoot, localRoot, rel string, log func(string)) error {
