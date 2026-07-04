@@ -24,13 +24,25 @@ var (
 // nolocks: go-nfs implements no NLM lock protocol. Default hard-mount
 // semantics are kept deliberately: transient stalls retry instead of
 // dropping writes.
+//
+// Some macOS configurations refuse to bind the NFS client to a
+// non-reserved (>1024) source port, causing the initial mount to fail.
+// Rather than requiring the user to diagnose and add "resvport" by hand,
+// retry once with it added: this keeps the tool zero-config for the
+// common case while still working on stricter setups.
 func MountNFS(mountpoint string, port int) error {
 	opts := fmt.Sprintf("port=%d,mountport=%d,tcp,vers=3,nolocks", port, port)
 	out, err := exec.Command("/sbin/mount", "-t", "nfs", "-o", opts, "localhost:/", mountpoint).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mount %s: %w: %s", mountpoint, err, out)
+	if err == nil {
+		return nil
 	}
-	return nil
+
+	retryOpts := opts + ",resvport"
+	retryOut, retryErr := exec.Command("/sbin/mount", "-t", "nfs", "-o", retryOpts, "localhost:/", mountpoint).CombinedOutput()
+	if retryErr == nil {
+		return nil
+	}
+	return fmt.Errorf("mount %s: first attempt: %w: %s; retry with resvport: %v: %s", mountpoint, err, out, retryErr, retryOut)
 }
 
 // IsMounted reports whether mountpoint currently carries an NFS filesystem.

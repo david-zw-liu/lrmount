@@ -38,10 +38,12 @@ func hintPath(mountpoint, root, devicePath string) string {
 // empty dir (leftover from a crash) is reused; live mounts and non-empty
 // dirs get a numeric suffix.
 func pickMountpoint(name string) (string, error) {
-	home, _ := os.UserHomeDir()
-	fallback := filepath.Join(home, "lrmount-volumes")
-	for _, base := range []string{"/Volumes", fallback} {
-		if base == fallback {
+	bases := []string{"/Volumes"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		bases = append(bases, filepath.Join(home, "lrmount-volumes"))
+	}
+	for baseIdx, base := range bases {
+		if baseIdx > 0 {
 			if err := os.MkdirAll(base, 0o755); err != nil {
 				continue
 			}

@@ -59,7 +59,9 @@ Computer".
 **Lightroom not found:** the app must be installed and expose file sharing.
 
 **Mount fails with a permission error:** some configurations require a
-reserved source port; see the `resvport` note in `internal/mountctl`.
+reserved client source port; lrmount automatically retries the mount once
+with `resvport` when the first attempt fails. If it still fails after the
+retry, please report it along with the mount output.
 
 **Volume shows as full:** the free-space numbers come from the device;
 reconnect and rerun if they look stale.

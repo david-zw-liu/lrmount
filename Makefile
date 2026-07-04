@@ -1,7 +1,12 @@
 BINARY := lrmount
 PKG := ./cmd/lrmount
 
-.PHONY: build test vet fmt clean
+.DEFAULT_GOAL := run
+
+.PHONY: run build test vet fmt clean
+
+run: build
+	./$(BINARY)
 
 build:
 	go build -o $(BINARY) $(PKG)

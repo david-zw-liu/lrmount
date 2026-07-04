@@ -20,11 +20,11 @@ func le64(vs ...uint64) []byte {
 
 func TestWritePacketFrames(t *testing.T) {
 	var buf bytes.Buffer
-	hp := []byte("from\x00to\x00\x00")
+	hp := []byte("from\x00to\x00")
 	if err := writePacket(&buf, 7, packet{op: opRenamePath, headerPayload: hp}); err != nil {
 		t.Fatal(err)
 	}
-	want := append([]byte("CFA6LPAA"), le64(40+9, 40+9, 7, 0x18)...)
+	want := append([]byte("CFA6LPAA"), le64(40+8, 40+8, 7, 0x18)...)
 	want = append(want, hp...)
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Fatalf("frame mismatch\n got %x\nwant %x", buf.Bytes(), want)
