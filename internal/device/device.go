@@ -36,33 +36,32 @@ func DescribeDevice(d ios.DeviceEntry) string {
 	return d.Properties.SerialNumber
 }
 
-// Info describes one connected device for the `devices` listing.
+// Info describes one connected USB device. It carries the usbmux DeviceEntry
+// it was resolved from so DetectSessions can bind to that exact snapshot —
+// avoiding a second ListDevices call that might disagree (e.g. a Wi-Fi device
+// that flaps in and out of the list between calls).
 type Info struct {
 	UDID        string
 	Name        string
 	ProductType string
 	Version     string
 	Err         string // lockdown error (e.g. device locked), if reading values failed
+	entry       ios.DeviceEntry
 }
 
 // List returns the connected USB devices, de-duplicated by udid (usbmuxd may
 // report the same device over more than one transport). For each it tries a
 // lockdown read for name/product/version; a failure is recorded in Err rather
-// than dropping the device.
+// than dropping the device. Only USB-connected devices are returned; devices
+// reachable only over Wi-Fi (usbmuxd "Network" transport) are ignored.
 func List() ([]Info, error) {
-	list, err := ios.ListDevices()
+	entries, err := usbEntries()
 	if err != nil {
-		return nil, fmt.Errorf("list devices: %w", err)
+		return nil, err
 	}
-	seen := make(map[string]bool)
 	var out []Info
-	for _, d := range list.DeviceList {
-		udid := d.Properties.SerialNumber
-		if seen[udid] {
-			continue
-		}
-		seen[udid] = true
-		info := Info{UDID: udid}
+	for _, d := range entries {
+		info := Info{UDID: d.Properties.SerialNumber, entry: d}
 		if vals, err := ios.GetValues(d); err != nil {
 			info.Err = err.Error()
 		} else {
@@ -75,49 +74,29 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
-// Present reports whether a device with the given udid is currently attached
-// over USB. It is a cheap usbmux query that never touches AFC, so it stays
-// responsive even when an app's AFC connection has gone dead (e.g. the cable
-// was pulled) — which makes it a reliable disconnect/reconnect detector.
-func Present(udid string) (bool, error) {
+// usbEntries returns one DeviceEntry per USB-connected device (deduplicated by
+// udid), skipping Wi-Fi ("Network") transports. This is a cheap usbmux query
+// that never touches AFC, so it stays responsive even when a device's AFC
+// connection has gone dead (e.g. the cable was pulled).
+func usbEntries() ([]ios.DeviceEntry, error) {
 	list, err := ios.ListDevices()
 	if err != nil {
-		return false, fmt.Errorf("list devices: %w", err)
+		return nil, fmt.Errorf("list devices: %w", err)
 	}
+	seen := make(map[string]bool)
+	var out []ios.DeviceEntry
 	for _, d := range list.DeviceList {
-		if d.Properties.SerialNumber == udid {
-			return true, nil
+		if d.ConnectionTypeLabel() != "USB" {
+			continue
 		}
-	}
-	return false, nil
-}
-
-// Connect resolves the target device (empty udid -> first device) and opens a
-// house_arrest AFC client, trying each bundleID in order until one vends
-// successfully (Lightroom uses a different bundle id on iPhone vs iPad). The
-// Session records which bundle id connected. At least one bundleID is required.
-func Connect(udid string, bundleIDs ...string) (*Session, error) {
-	d, err := ios.GetDevice(udid)
-	if err != nil {
-		return nil, fmt.Errorf("resolve device: %w", err)
-	}
-	if len(bundleIDs) == 0 {
-		return nil, fmt.Errorf("no bundle id provided")
-	}
-	var lastErr error
-	for _, bundleID := range bundleIDs {
-		client, err := openHouseArrest(d, bundleID)
-		if err == nil {
-			return &Session{
-				FS:       afcfs.Wrap(client),
-				Label:    DescribeDevice(d),
-				BundleID: bundleID,
-				closer:   client.Close,
-			}, nil
+		udid := d.Properties.SerialNumber
+		if seen[udid] {
+			continue
 		}
-		lastErr = err
+		seen[udid] = true
+		out = append(out, d)
 	}
-	return nil, lastErr
+	return out, nil
 }
 
 // openHouseArrest opens the house_arrest service and vends bundleID's
@@ -156,13 +135,15 @@ func collectVendable(bundleIDs []string, probe func(string) (*Session, error)) (
 	return out, nil
 }
 
-// DetectSessions resolves the device and opens a house_arrest AFC session for
-// every installed Lightroom app (each bundle id that vends). At least one must
-// vend or it returns an error. Callers own Close() on every returned session.
-func DetectSessions(udid string, bundleIDs []string) ([]*Session, error) {
-	d, err := ios.GetDevice(udid)
-	if err != nil {
-		return nil, fmt.Errorf("resolve device: %w", err)
+// DetectSessions opens a house_arrest AFC session for every installed
+// Lightroom app (each bundle id that vends) on the USB device described by
+// info. It binds to info's snapshot DeviceEntry, so a Wi-Fi device that was
+// filtered out of List never reaches here. At least one app must vend or it
+// errors. Callers own Close() on every returned session.
+func DetectSessions(info Info, bundleIDs []string) ([]*Session, error) {
+	d := info.entry
+	if d.Properties.SerialNumber == "" {
+		return nil, fmt.Errorf("device %s has no USB entry", info.UDID)
 	}
 	return collectVendable(bundleIDs, func(id string) (*Session, error) {
 		client, err := openHouseArrest(d, id)

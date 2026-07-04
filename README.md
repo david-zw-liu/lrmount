@@ -9,20 +9,21 @@ jailbreak, no kernel extensions, nothing to install.
 
 Running `lrmount`:
 
-1. Picks a connected USB device (auto if one, arrow-key menu if several). If
-   none is attached, it waits for one to appear.
-2. Detects every installed Lightroom app (`com.adobe.lrmobilephone`, then
-   `com.adobe.lrmobile`) and starts one embedded NFS server per app,
-   bridging NFS operations straight to the device over AFC.
+1. Mounts every USB-connected device, no prompt; devices reachable only over
+   Wi-Fi are ignored. It runs as a resident daemon — plug in a device and it
+   mounts automatically, unplug and it ejects, until you press Ctrl-C.
+2. Detects every installed Lightroom app on each device
+   (`com.adobe.lrmobilephone`, then `com.adobe.lrmobile`) and serves them
+   through one embedded NFS server, bridging NFS operations straight to the
+   device over AFC.
 3. Mounts the device once under the per-user temp dir
-   (`$TMPDIR/lrmount/<device>/`, falling back to `~/.lrmount/` if the temp
-   mount is refused) with the built-in macOS NFS client; the volume shows in
-   Finder named after the device (the mountpoint is throwaway scratch — the
-   data lives on the device). Inside it
-   each Lightroom app is a subfolder (`Lightroom Mobile` /
-   `Lightroom for iPad`) containing that app's `Documents/`. User presets
-   live under `<app>/<catalog>/settings-acr/userStyles/` (paths are printed
-   at startup).
+   (`$TMPDIR/lrmount/<device>/`) with the built-in macOS NFS client; the
+   volume shows in Finder named after the device (the mountpoint is
+   throwaway scratch — the data lives on the device). Inside it each
+   Lightroom app is a subfolder (`Lightroom Mobile` / `Lightroom for iPad`)
+   containing that app's `Documents/`. User presets live under
+   `<app>/<catalog>/settings-acr/userStyles/` (paths are printed at
+   startup).
 4. Stays running. lrmount is resident: unplug the cable and it auto-ejects
    the volumes, then re-mounts them when you reconnect the device — it does
    not exit. Eject a volume in Finder when you are done (macOS flushes every
@@ -49,10 +50,11 @@ flush.
 
     ./lrmount
 
-Pick a device if prompted, then **fully close Lightroom** on the device
-(swipe it away in the app switcher) while volumes are mounted. Edit presets
-in Finder under the printed paths. Eject in Finder when done, then reopen
-Lightroom so it rebuilds its preset index.
+Every USB device mounts automatically. **Fully close Lightroom** on a device
+(swipe it away in the app switcher) while its volume is mounted, then edit
+presets in Finder under the printed paths. Eject a device's volume in Finder
+when you are done with it (and reopen Lightroom so it rebuilds its preset
+index); press Ctrl-C to quit lrmount.
 
 ### Safety
 
