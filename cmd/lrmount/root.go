@@ -208,6 +208,10 @@ func shutdownAll(mounts map[string]*deviceMount) {
 		}
 		closeSessions(dm.sessions)
 	}
+	// Each volume's mountpoint dir was removed as it was torn down; drop the
+	// now-empty parent scratch dir too. Best effort: it stays if a leftover
+	// orphan mount (e.g. from a kill -9) is still using it.
+	_ = os.Remove(mountBase())
 }
 
 // catRef locates one catalog's userStyles so its mounted path can be printed

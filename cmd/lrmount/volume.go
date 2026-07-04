@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,15 +41,11 @@ func hintPath(mountpoint, app, root, devicePath string) string {
 
 // mountBase is where volumes are mounted. A mountpoint is throwaway scratch
 // (the data is on the device; Finder names the volume from the NFS share), so
-// it lives under the per-user temp dir — $TMPDIR (/var/folders/.../T on
-// macOS), NOT the shared /private/tmp, which rejects user NFS mounts from an
-// unsigned binary with "Operation not permitted".
+// it lives under the per-user temp dir, $TMPDIR (/var/folders/.../T on macOS).
+// If $TMPDIR resolves to a location that refuses user NFS mounts (e.g. the
+// shared /private/tmp), the mount simply fails and is reported — no fallback.
 func mountBase() string {
-	t := os.TempDir()
-	if t == "" || t == "/tmp" || t == "/private/tmp" {
-		t = "/var/tmp" // last resort; still per-user-writable and mountable
-	}
-	return filepath.Join(t, "lrmount")
+	return filepath.Join(os.TempDir(), "lrmount")
 }
 
 // mountAt mounts the NFS server on port as deviceName and returns the
@@ -68,28 +63,23 @@ func mountAt(deviceName string, port int) (string, error) {
 	return mp, nil
 }
 
-// makeMountpoint creates an unused mount directory under base for deviceName
-// and returns its canonical path. The path is resolved through symlinks here,
-// while it is still a plain directory, because the kernel mount table reports
-// real paths (e.g. /private/var, not the /var symlink) — comparing an
-// unresolved path against it would make a live mount look unmounted.
+// makeMountpoint creates a fresh, uniquely-named mount directory under base
+// for deviceName and returns its canonical path. The random suffix guarantees
+// no collision with a leftover mount from a previous run. The path is resolved
+// through symlinks here, while it is still a plain directory, because the
+// kernel mount table reports real paths (e.g. /private/var, not the /var
+// symlink) — comparing an unresolved path against it would make a live mount
+// look unmounted.
 func makeMountpoint(base, deviceName string) (string, error) {
-	for i := 1; i <= 9; i++ {
-		leaf := sanitizeSeg(deviceName)
-		if i > 1 {
-			leaf = fmt.Sprintf("%s %d", leaf, i)
-		}
-		mp := filepath.Join(base, leaf)
-		if err := os.MkdirAll(mp, 0o755); err != nil {
-			return "", err
-		}
-		if real, err := filepath.EvalSymlinks(mp); err == nil {
-			mp = real
-		}
-		if mountctl.IsMounted(mp) {
-			continue
-		}
-		return mp, nil
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("no usable mountpoint under %q", base)
+	mp, err := os.MkdirTemp(base, sanitizeSeg(deviceName)+"-*")
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(mp); err == nil {
+		mp = real
+	}
+	return mp, nil
 }
