@@ -173,7 +173,6 @@ func waitAndPickDevice(ctx context.Context) (device.Info, bool) {
 // sessions. A per-volume failure is reported and skipped; the returned slice
 // holds only the volumes that mounted.
 func mountVolumes(sessions []*device.Session, deviceName string) []*volume {
-	multi := len(sessions) > 1
 	var mounted []*volume
 	for _, s := range sessions {
 		docs, err := locate.DocumentsRoot(s.FS, "")
@@ -181,7 +180,7 @@ func mountVolumes(sessions []*device.Session, deviceName string) []*volume {
 			fmt.Fprintf(os.Stderr, "[%s] skipped: %v\n", s.BundleID, err)
 			continue
 		}
-		v := &volume{sess: s, root: docs, name: volumeName(deviceName, s.BundleID, multi)}
+		v := &volume{sess: s, root: docs, name: appLabel(s.BundleID)}
 		if cands, err := locate.FindCatalogs(s.FS, docs); err == nil {
 			for _, c := range cands {
 				v.hints = append(v.hints, c.UserStyles)
@@ -198,7 +197,7 @@ func mountVolumes(sessions []*device.Session, deviceName string) []*volume {
 				fmt.Fprintf(os.Stderr, "[%s] nfs server: %v\n", v.name, err)
 			}
 		}(v)
-		mp, err := pickMountpoint(v.name)
+		mp, err := mountpointFor(deviceName, v.name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] %v\n", v.name, err)
 			ln.Close()

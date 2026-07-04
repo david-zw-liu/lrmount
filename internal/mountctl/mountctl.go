@@ -12,8 +12,38 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// statfsFn is swappable in tests.
-var statfsFn = unix.Statfs
+// mountEntry is one row of the kernel mount table.
+type mountEntry struct {
+	dir    string
+	fstype string
+}
+
+// listMountsFn is swappable in tests.
+var listMountsFn = listMounts
+
+// listMounts reads the kernel mount table with MNT_NOWAIT so it reports cached
+// state without contacting each filesystem's server. That is essential here:
+// statfs on a not-responding NFS mount blocks or errors, but the mount is
+// still registered — enumerating the table sees it and won't hang.
+func listMounts() ([]mountEntry, error) {
+	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
+	if err != nil {
+		return nil, err
+	}
+	bufs := make([]unix.Statfs_t, n)
+	n, err = unix.Getfsstat(bufs, unix.MNT_NOWAIT)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mountEntry, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, mountEntry{
+			dir:    unix.ByteSliceToString(bufs[i].Mntonname[:]),
+			fstype: unix.ByteSliceToString(bufs[i].Fstypename[:]),
+		})
+	}
+	return out, nil
+}
 
 // MountNFS mounts the localhost NFS server listening on port at mountpoint.
 // nolocks: go-nfs implements no NLM lock protocol. Default hard-mount
@@ -47,14 +77,22 @@ func MountNFS(mountpoint, share string, port int) error {
 	return fmt.Errorf("mount %s: first attempt: %w: %s; retry with resvport: %v: %s", mountpoint, err, out, retryErr, retryOut)
 }
 
-// IsMounted reports whether mountpoint currently carries an NFS filesystem.
-// After an eject, statfs sees the parent (apfs) filesystem instead.
+// IsMounted reports whether an NFS filesystem is currently mounted at
+// mountpoint. It checks the kernel mount table (not statfs on the path), so a
+// briefly not-responding NFS server still reads as mounted — only a real
+// unmount (Finder eject or diskutil) removes the entry. That distinction is
+// what keeps a transient stall from being mistaken for an eject.
 func IsMounted(mountpoint string) bool {
-	var st unix.Statfs_t
-	if err := statfsFn(mountpoint, &st); err != nil {
+	mounts, err := listMountsFn()
+	if err != nil {
 		return false
 	}
-	return unix.ByteSliceToString(st.Fstypename[:]) == "nfs"
+	for _, m := range mounts {
+		if m.dir == mountpoint && m.fstype == "nfs" {
+			return true
+		}
+	}
+	return false
 }
 
 // Unmount unmounts via diskutil, which performs the same flush as a Finder

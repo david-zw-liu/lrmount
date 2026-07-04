@@ -14,8 +14,10 @@ Running `lrmount`:
 2. Detects every installed Lightroom app (`com.adobe.lrmobilephone`, then
    `com.adobe.lrmobile`) and starts one embedded NFS server per app,
    bridging NFS operations straight to the device over AFC.
-3. Mounts each app's `Documents/` at `/Volumes/<device> Lightroom` with
-   the built-in macOS NFS client. User presets live under
+3. Mounts each app's `Documents/` at
+   `~/lrmount/<device>/<Lightroom Mobile|Lightroom for iPad>/` with the
+   built-in macOS NFS client; the volume shows in the Finder sidebar under
+   the app's name. User presets live under
    `<catalog>/settings-acr/userStyles/` (paths are printed at startup).
 4. Stays running. lrmount is resident: unplug the cable and it auto-ejects
    the volumes, then re-mounts them when you reconnect the device — it does

@@ -9,22 +9,27 @@ import (
 	"github.com/david-zw-liu/lrmount/internal/mountctl"
 )
 
-// volumeName builds the Finder volume name for one (device, app) pair.
-// multi appends the bundle id's last segment when a device has more than
-// one Lightroom app.
-func volumeName(deviceName, bundleID string, multi bool) string {
-	clean := strings.Map(func(r rune) rune {
+// appLabel maps a Lightroom bundle id to the human-readable name shown as the
+// Finder volume name and used as the mount-path segment.
+func appLabel(bundleID string) string {
+	switch bundleID {
+	case "com.adobe.lrmobilephone":
+		return "Lightroom Mobile"
+	case "com.adobe.lrmobile":
+		return "Lightroom for iPad"
+	default:
+		return "Lightroom"
+	}
+}
+
+// sanitizeSeg makes s safe as a single filesystem path segment.
+func sanitizeSeg(s string) string {
+	return strings.Map(func(r rune) rune {
 		if r == '/' || r == ':' {
 			return '-'
 		}
 		return r
-	}, deviceName)
-	name := clean + " Lightroom"
-	if multi {
-		parts := strings.Split(bundleID, ".")
-		name += " " + parts[len(parts)-1]
-	}
-	return name
+	}, s)
 }
 
 // hintPath maps a device-side userStyles path onto its mounted location.
@@ -33,37 +38,28 @@ func hintPath(mountpoint, root, devicePath string) string {
 	return filepath.Join(mountpoint, rel)
 }
 
-// pickMountpoint creates and returns a usable mountpoint dir for name,
-// preferring /Volumes and falling back to ~/lrmount-volumes. An existing
-// empty dir (leftover from a crash) is reused; live mounts and non-empty
-// dirs get a numeric suffix.
-func pickMountpoint(name string) (string, error) {
-	bases := []string{"/Volumes"}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		bases = append(bases, filepath.Join(home, "lrmount-volumes"))
+// mountpointFor returns the mount directory ~/lrmount/{device}/{app}, creating
+// the parent hierarchy. A live mount already at that path (leftover from a
+// prior run) gets a numeric suffix so we never mount two volumes on one dir.
+func mountpointFor(deviceName, app string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", fmt.Errorf("cannot resolve home directory: %w", err)
 	}
-	for baseIdx, base := range bases {
-		if baseIdx > 0 {
-			if err := os.MkdirAll(base, 0o755); err != nil {
-				continue
-			}
+	base := filepath.Join(home, "lrmount", sanitizeSeg(deviceName))
+	for i := 1; i <= 9; i++ {
+		leaf := sanitizeSeg(app)
+		if i > 1 {
+			leaf = fmt.Sprintf("%s %d", leaf, i)
 		}
-		for i := 1; i <= 9; i++ {
-			n := name
-			if i > 1 {
-				n = fmt.Sprintf("%s %d", name, i)
-			}
-			mp := filepath.Join(base, n)
-			if mountctl.IsMounted(mp) {
-				continue
-			}
-			if err := os.Mkdir(mp, 0o755); err == nil {
-				return mp, nil
-			}
-			if entries, err := os.ReadDir(mp); err == nil && len(entries) == 0 {
-				return mp, nil
-			}
+		mp := filepath.Join(base, leaf)
+		if mountctl.IsMounted(mp) {
+			continue
 		}
+		if err := os.MkdirAll(mp, 0o755); err != nil {
+			return "", err
+		}
+		return mp, nil
 	}
-	return "", fmt.Errorf("no usable mountpoint for %q", name)
+	return "", fmt.Errorf("no usable mountpoint under %q", base)
 }

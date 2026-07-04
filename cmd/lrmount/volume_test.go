@@ -5,16 +5,25 @@ import (
 	"testing"
 )
 
-func TestVolumeName(t *testing.T) {
-	if got := volumeName("David's iPhone", "com.adobe.lrmobilephone", false); got != "David's iPhone Lightroom" {
-		t.Fatalf("got %q", got)
+func TestAppLabel(t *testing.T) {
+	cases := map[string]string{
+		"com.adobe.lrmobilephone": "Lightroom Mobile",
+		"com.adobe.lrmobile":      "Lightroom for iPad",
+		"com.adobe.unknown":       "Lightroom",
 	}
-	if got := volumeName("iPad", "com.adobe.lrmobile", true); got != "iPad Lightroom lrmobile" {
-		t.Fatalf("got %q", got)
+	for bundle, want := range cases {
+		if got := appLabel(bundle); got != want {
+			t.Fatalf("appLabel(%q) = %q, want %q", bundle, got, want)
+		}
 	}
-	// path-hostile characters are replaced
-	if got := volumeName("we/ird:name", "b", false); strings.ContainsAny(got, "/:") {
-		t.Fatalf("got %q", got)
+}
+
+func TestSanitizeSeg(t *testing.T) {
+	if got := sanitizeSeg("we/ird:name"); strings.ContainsAny(got, "/:") {
+		t.Fatalf("got %q, still contains a path-hostile character", got)
+	}
+	if got := sanitizeSeg("David's iPhone"); got != "David's iPhone" {
+		t.Fatalf("got %q, apostrophes and spaces should be preserved", got)
 	}
 }
 
