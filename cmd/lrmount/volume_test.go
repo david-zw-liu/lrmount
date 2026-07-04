@@ -28,13 +28,13 @@ func TestSanitizeSeg(t *testing.T) {
 }
 
 func TestHintPath(t *testing.T) {
-	got := hintPath("/Volumes/iPad Lightroom", "Documents", "Documents/cat/settings-acr/userStyles")
-	if got != "/Volumes/iPad Lightroom/cat/settings-acr/userStyles" {
+	got := hintPath("/m/iPhone", "Lightroom Mobile", "Documents", "Documents/cat/settings-acr/userStyles")
+	if got != "/m/iPhone/Lightroom Mobile/cat/settings-acr/userStyles" {
 		t.Fatalf("got %q", got)
 	}
 	// root "" means the AFC root already is Documents
-	got = hintPath("/Volumes/x", "", "cat/settings-acr/userStyles")
-	if got != "/Volumes/x/cat/settings-acr/userStyles" {
+	got = hintPath("/m/iPhone", "Lightroom Mobile", "", "cat/settings-acr/userStyles")
+	if got != "/m/iPhone/Lightroom Mobile/cat/settings-acr/userStyles" {
 		t.Fatalf("got %q", got)
 	}
 }

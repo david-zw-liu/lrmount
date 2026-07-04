@@ -32,23 +32,25 @@ func sanitizeSeg(s string) string {
 	}, s)
 }
 
-// hintPath maps a device-side userStyles path onto its mounted location.
-func hintPath(mountpoint, root, devicePath string) string {
+// hintPath maps a device-side userStyles path onto its mounted location:
+// <mountpoint>/<app>/<path within Documents>. app is the virtual
+// subdirectory the Router serves that device's app under.
+func hintPath(mountpoint, app, root, devicePath string) string {
 	rel := strings.Trim(strings.TrimPrefix(devicePath, strings.Trim(root, "/")), "/")
-	return filepath.Join(mountpoint, rel)
+	return filepath.Join(mountpoint, app, rel)
 }
 
-// mountpointFor returns the mount directory ~/lrmount/{device}/{app}, creating
-// the parent hierarchy. A live mount already at that path (leftover from a
-// prior run) gets a numeric suffix so we never mount two volumes on one dir.
-func mountpointFor(deviceName, app string) (string, error) {
+// mountpointFor returns the mount directory ~/lrmount/{device}, creating the
+// parent hierarchy. A live mount already there (leftover from a prior run)
+// gets a numeric suffix so we never mount two volumes on one dir.
+func mountpointFor(deviceName string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return "", fmt.Errorf("cannot resolve home directory: %w", err)
 	}
-	base := filepath.Join(home, "lrmount", sanitizeSeg(deviceName))
+	base := filepath.Join(home, "lrmount")
 	for i := 1; i <= 9; i++ {
-		leaf := sanitizeSeg(app)
+		leaf := sanitizeSeg(deviceName)
 		if i > 1 {
 			leaf = fmt.Sprintf("%s %d", leaf, i)
 		}

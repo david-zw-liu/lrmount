@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 	"github.com/david-zw-liu/lrmount/internal/device"
 	"github.com/david-zw-liu/lrmount/internal/locate"
 	"github.com/david-zw-liu/lrmount/internal/mountctl"
@@ -32,9 +33,7 @@ var rootCmd = &cobra.Command{
 func Execute() error { return rootCmd.Execute() }
 
 type volume struct {
-	sess         *device.Session
-	name         string
-	root         string // Documents root on the device
+	name         string // device name → Finder volume label
 	hints        []string
 	mountpoint   string
 	ln           net.Listener
@@ -102,7 +101,7 @@ func run() error {
 			continue
 		}
 
-		mounted := mountVolumes(sessions, chosenName)
+		mounted := mountDevice(sessions, chosenName)
 		if len(mounted) == 0 {
 			closeSessions(sessions)
 			fmt.Fprintln(os.Stderr, "no Lightroom app with a usable Documents folder — retrying…")
@@ -169,55 +168,75 @@ func waitAndPickDevice(ctx context.Context) (device.Info, bool) {
 	}
 }
 
-// mountVolumes opens an NFS server and Finder mount for each Lightroom app in
-// sessions. A per-volume failure is reported and skipped; the returned slice
-// holds only the volumes that mounted.
-func mountVolumes(sessions []*device.Session, deviceName string) []*volume {
-	var mounted []*volume
+// catRef locates one catalog's userStyles so its mounted path can be printed
+// once the mountpoint is known.
+type catRef struct {
+	app        string
+	root       string
+	devicePath string
+}
+
+// mountDevice serves every Lightroom app on the device through one NFS server
+// — each app a virtual subdirectory (Router) — and mounts it once as
+// ~/lrmount/<device>, so Finder shows "<device>" containing "<app>/…". It
+// returns a single-element slice (or nil if nothing mounted); the plural
+// shape keeps the supervise loop uniform.
+func mountDevice(sessions []*device.Session, deviceName string) []*volume {
+	var entries []afcfs.NamedFS
+	var refs []catRef
 	for _, s := range sessions {
 		docs, err := locate.DocumentsRoot(s.FS, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] skipped: %v\n", s.BundleID, err)
 			continue
 		}
-		v := &volume{sess: s, root: docs, name: appLabel(s.BundleID)}
+		label := appLabel(s.BundleID)
+		entries = append(entries, afcfs.NamedFS{Name: label, FS: afcfs.Rooted(s.FS, docs)})
 		if cands, err := locate.FindCatalogs(s.FS, docs); err == nil {
 			for _, c := range cands {
-				v.hints = append(v.hints, c.UserStyles)
+				refs = append(refs, catRef{app: label, root: docs, devicePath: c.UserStyles})
 			}
-		}
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] listen: %v\n", v.name, err)
-			continue
-		}
-		v.ln = ln
-		go func(v *volume) {
-			if err := nfsgate.Serve(v.ln, v.sess.FS, v.root); err != nil && !errors.Is(err, net.ErrClosed) {
-				fmt.Fprintf(os.Stderr, "[%s] nfs server: %v\n", v.name, err)
-			}
-		}(v)
-		mp, err := mountpointFor(deviceName, v.name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] %v\n", v.name, err)
-			ln.Close()
-			continue
-		}
-		port := ln.Addr().(*net.TCPAddr).Port
-		if err := mountctl.MountNFS(mp, v.name, port); err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] %v\n", v.name, err)
-			ln.Close()
-			mountctl.Cleanup(mp)
-			continue
-		}
-		v.mountpoint = mp
-		mounted = append(mounted, v)
-		fmt.Printf("mounted  %s\n", mp)
-		for _, h := range v.hints {
-			fmt.Printf("  presets: %s\n", hintPath(mp, v.root, h))
 		}
 	}
-	return mounted
+	if len(entries) == 0 {
+		return nil
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen: %v\n", err)
+		return nil
+	}
+	router := afcfs.NewRouter(entries)
+	go func() {
+		if err := nfsgate.Serve(ln, router, ""); err != nil && !errors.Is(err, net.ErrClosed) {
+			fmt.Fprintf(os.Stderr, "nfs server: %v\n", err)
+		}
+	}()
+
+	mp, err := mountpointFor(deviceName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		ln.Close()
+		return nil
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := mountctl.MountNFS(mp, deviceName, port); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		ln.Close()
+		mountctl.Cleanup(mp)
+		return nil
+	}
+
+	v := &volume{name: deviceName, mountpoint: mp, ln: ln}
+	for _, r := range refs {
+		v.hints = append(v.hints, hintPath(mp, r.app, r.root, r.devicePath))
+	}
+	fmt.Printf("mounted  %s\n", mp)
+	for _, h := range v.hints {
+		fmt.Printf("  presets: %s\n", h)
+	}
+	return []*volume{v}
 }
 
 // superviseGeneration runs a single connectivity generation from one
