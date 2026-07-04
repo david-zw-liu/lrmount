@@ -1,37 +1,54 @@
-// Package afcfs is the single boundary between lrpush logic and go-ios AFC.
-// Logic depends only on the FS interface so it can be tested with MemFS.
+// Package afcfs is the single boundary between lrmount logic and the AFC
+// protocol client. Logic depends only on the FS interface so it can be
+// tested with MemFS.
 package afcfs
 
 import (
+	"io"
 	"os"
+	"time"
 
-	"github.com/danielpaulus/go-ios/ios/afc"
+	"github.com/davidliu/lrpush/internal/afc"
 )
 
-// FileInfo is the subset of stat data lrpush needs. go-ios v1.2.0 exposes no
-// modification time, so there is deliberately no ModTime field here.
+// FileInfo is the subset of stat data lrmount needs.
 type FileInfo struct {
-	Name  string
-	IsDir bool
-	Size  int64
+	Name    string
+	IsDir   bool
+	Size    int64
+	ModTime time.Time
 }
 
-// FS is the device filesystem surface lrpush depends on.
+// File is one open handle on the device.
+type File interface {
+	io.Reader
+	io.Writer
+	io.Closer
+	Seek(offset int64, whence int) (int64, error)
+	Truncate(size int64) error
+}
+
+// FS is the device filesystem surface lrmount depends on. Paths use "/"
+// separators relative to the AFC root, no leading slash.
 type FS interface {
-	List(devicePath string) ([]string, error)
-	Stat(devicePath string) (FileInfo, error)
-	MkDir(devicePath string) error
-	RemoveAll(devicePath string) error
-	// Pull recursively copies a device path (file or dir) to localDst.
-	Pull(deviceSrc, localDst string) error
-	// PushFile pushes a single local file to an exact device path.
-	PushFile(localSrc, deviceDst string) error
+	List(p string) ([]string, error)
+	Stat(p string) (FileInfo, error)
+	MkDir(p string) error
+	// Remove is non-recursive and fails on non-empty directories, matching
+	// what NFS REMOVE/RMDIR require.
+	Remove(p string) error
+	Rename(from, to string) error
+	SetMtime(p string, t time.Time) error
+	// OpenFile takes an os.O_* flag combination. Mirroring AFC semantics,
+	// any writable mode creates a missing file.
+	OpenFile(p string, flag int) (File, error)
+	DeviceInfo() (total, free uint64, err error)
 }
 
-type clientFS struct{ c *afc.Client }
+type clientFS struct{ c *afc.Conn }
 
-// Wrap adapts a go-ios afc.Client to the FS interface.
-func Wrap(c *afc.Client) FS { return &clientFS{c: c} }
+// Wrap adapts an afc.Conn to the FS interface.
+func Wrap(c *afc.Conn) FS { return &clientFS{c: c} }
 
 func (f *clientFS) List(p string) ([]string, error) { return f.c.List(p) }
 
@@ -40,20 +57,43 @@ func (f *clientFS) Stat(p string) (FileInfo, error) {
 	if err != nil {
 		return FileInfo{}, err
 	}
-	return FileInfo{Name: fi.Name, IsDir: fi.IsDir(), Size: fi.Size}, nil
+	return FileInfo{Name: fi.Name, IsDir: fi.IsDir, Size: fi.Size, ModTime: fi.ModTime}, nil
 }
 
-func (f *clientFS) MkDir(p string) error       { return f.c.MkDir(p) }
-func (f *clientFS) RemoveAll(p string) error   { return f.c.RemoveAll(p) }
-func (f *clientFS) Pull(src, dst string) error { return f.c.Pull(src, dst) }
+func (f *clientFS) MkDir(p string) error                 { return f.c.MkDir(p) }
+func (f *clientFS) Remove(p string) error                { return f.c.Remove(p) }
+func (f *clientFS) Rename(from, to string) error         { return f.c.Rename(from, to) }
+func (f *clientFS) SetMtime(p string, t time.Time) error { return f.c.SetMtime(p, t) }
 
-// PushFile uses WriteToFile (not Push) so the device path is written exactly,
-// avoiding go-ios Push's "append basename if dst is a dir" behavior.
-func (f *clientFS) PushFile(localSrc, deviceDst string) error {
-	in, err := os.Open(localSrc)
+func (f *clientFS) OpenFile(p string, flag int) (File, error) {
+	return f.c.Open(p, afcOpenMode(flag))
+}
+
+func (f *clientFS) DeviceInfo() (uint64, uint64, error) {
+	di, err := f.c.DeviceInfo()
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
-	defer in.Close()
-	return f.c.WriteToFile(in, deviceDst)
+	return di.TotalBytes, di.FreeBytes, nil
+}
+
+// afcOpenMode maps os.O_* flags onto AFC open modes. AFC's write-only mode
+// truncates, so plain O_WRONLY maps to read-write-create to preserve content.
+func afcOpenMode(flag int) uint64 {
+	switch {
+	case flag&os.O_APPEND != 0:
+		if flag&os.O_RDWR != 0 {
+			return afc.ModeRDAppend
+		}
+		return afc.ModeAppend
+	case flag&os.O_TRUNC != 0:
+		if flag&os.O_RDWR != 0 {
+			return afc.ModeWR
+		}
+		return afc.ModeWROnly
+	case flag&(os.O_RDWR|os.O_WRONLY) != 0:
+		return afc.ModeRW
+	default:
+		return afc.ModeRDOnly
+	}
 }

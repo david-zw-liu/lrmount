@@ -10,8 +10,6 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"golang.org/x/term"
-
-	"github.com/davidliu/lrpush/internal/locate"
 )
 
 // pickIndex shows an arrow-key menu (huh) on a TTY, or a numbered stdin prompt
@@ -47,13 +45,4 @@ func pickIndex(title string, labels []string) (int, error) {
 		return -1, fmt.Errorf("invalid selection %q", strings.TrimSpace(line))
 	}
 	return n - 1, nil
-}
-
-// catalogPicker adapts pickIndex to locate.SelectCatalog's picker signature.
-func catalogPicker(cands []locate.Catalog) (int, error) {
-	labels := make([]string, len(cands))
-	for i, c := range cands {
-		labels[i] = fmt.Sprintf("%s (%d presets)", c.Name, c.PresetCount)
-	}
-	return pickIndex("Select a catalog", labels)
 }

@@ -82,37 +82,3 @@ func FindCatalogs(fs afcfs.FS, docsRoot string) ([]Catalog, error) {
 	}
 	return out, nil
 }
-
-// SelectCatalog picks one catalog. catalogFlag forces a name; otherwise single
-// candidate auto-selects and multiple candidates call picker (interactive menu).
-func SelectCatalog(cands []Catalog, catalogFlag string, picker func([]Catalog) (int, error)) (Catalog, error) {
-	if len(cands) == 0 {
-		return Catalog{}, fmt.Errorf("no catalog with a settings-acr folder found; app may not have created a catalog yet, or set --path-prefix")
-	}
-	if catalogFlag != "" {
-		for _, c := range cands {
-			if c.Name == catalogFlag {
-				return c, nil
-			}
-		}
-		var names []string
-		for _, c := range cands {
-			names = append(names, c.Name)
-		}
-		return Catalog{}, fmt.Errorf("catalog %q not found; available: %s", catalogFlag, strings.Join(names, ", "))
-	}
-	if len(cands) == 1 {
-		return cands[0], nil
-	}
-	if picker == nil {
-		return Catalog{}, fmt.Errorf("%d catalogs found; pass --catalog <name> to choose", len(cands))
-	}
-	i, err := picker(cands)
-	if err != nil {
-		return Catalog{}, err
-	}
-	if i < 0 || i >= len(cands) {
-		return Catalog{}, fmt.Errorf("invalid catalog selection %d", i)
-	}
-	return cands[i], nil
-}

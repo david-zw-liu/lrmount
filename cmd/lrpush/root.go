@@ -1,18 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"sync"
 
 	"github.com/spf13/cobra"
 
 	"github.com/davidliu/lrpush/internal/device"
 	"github.com/davidliu/lrpush/internal/locate"
-	"github.com/davidliu/lrpush/internal/mirror"
 )
 
 // lightroomBundleIDs are probed in order; the iPhone app comes first.
@@ -27,24 +21,6 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() error { return rootCmd.Execute() }
-
-// prefixLogger returns a logger that tags each line with the bundle id when
-// more than one app is being mirrored concurrently.
-func prefixLogger(bundleID string, multi bool) func(string) {
-	return func(s string) {
-		if multi {
-			fmt.Printf("[%s] %s\n", bundleID, s)
-		} else {
-			fmt.Println(s)
-		}
-	}
-}
-
-type appMirror struct {
-	sess       *device.Session
-	userStyles string
-	localDir   string
-}
 
 func run() error {
 	// 1. Pick device.
@@ -79,8 +55,7 @@ func run() error {
 		}
 	}()
 
-	// 3. Per-app: locate userStyles + choose catalog + compute local dir.
-	var mirrors []appMirror
+	// 3. Per-app: report what would be mounted (mount flow lands next).
 	for _, s := range sessions {
 		docs, err := locate.DocumentsRoot(s.FS, "")
 		if err != nil {
@@ -90,57 +65,8 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("[%s] %w", s.BundleID, err)
 		}
-		cat, err := locate.SelectCatalog(cands, "", catalogPicker)
-		if err != nil {
-			return fmt.Errorf("[%s] %w", s.BundleID, err)
-		}
-		mirrors = append(mirrors, appMirror{
-			sess:       s,
-			userStyles: cat.UserStyles,
-			localDir:   filepath.Join("sync", s.BundleID, "userStyles"),
-		})
+		fmt.Printf("[%s] Documents root %q, %d catalog(s)\n", s.BundleID, docs, len(cands))
 	}
-	multi := len(mirrors) > 1
-
-	// 4. Wipe ./sync then pull-replace each app.
-	if err := os.RemoveAll("sync"); err != nil {
-		return fmt.Errorf("clear ./sync: %w", err)
-	}
-	for _, m := range mirrors {
-		log := prefixLogger(m.sess.BundleID, multi)
-		if err := mirror.PullReplace(m.sess.FS, m.userStyles, m.localDir, log); err != nil {
-			return fmt.Errorf("[%s] initial pull: %w", m.sess.BundleID, err)
-		}
-	}
-
-	// 5. Warn once, then print absolute watch paths.
-	fmt.Print(warningBanner())
-	for _, m := range mirrors {
-		abs, _ := filepath.Abs(m.localDir)
-		fmt.Printf("editing → %s  (watching for changes; Ctrl-C to stop)\n", abs)
-	}
-
-	// 6. Start a watcher per app; run until Ctrl-C.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	var wg sync.WaitGroup
-	for _, m := range mirrors {
-		w, err := mirror.NewWatcher(m.sess.FS, m.localDir, m.userStyles, prefixLogger(m.sess.BundleID, multi))
-		if err != nil {
-			return err
-		}
-		wg.Add(1)
-		go func(w *mirror.Watcher, bundle string) {
-			defer wg.Done()
-			if err := w.Run(ctx); err != nil {
-				fmt.Fprintf(os.Stderr, "[%s] watcher error: %v\n", bundle, err)
-			}
-		}(w, m.sess.BundleID)
-	}
-	<-ctx.Done()
-	wg.Wait()
-
-	// 7. Closing reminder.
-	fmt.Println("\nStopped. Reopen Lightroom so it rebuilds its preset index.")
+	fmt.Println("NFS mount flow lands in a later commit on this branch.")
 	return nil
 }

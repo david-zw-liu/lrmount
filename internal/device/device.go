@@ -5,12 +5,10 @@ import (
 	"fmt"
 
 	"github.com/danielpaulus/go-ios/ios"
-	"github.com/danielpaulus/go-ios/ios/afc"
 
+	"github.com/davidliu/lrpush/internal/afc"
 	"github.com/davidliu/lrpush/internal/afcfs"
 )
-
-const houseArrestService = "com.apple.mobile.house_arrest"
 
 // vendCommands are tried in order. Lightroom is a file-sharing app
 // (UIFileSharingEnabled): it answers "VendDocuments" but returns
@@ -105,14 +103,14 @@ func Connect(udid string, bundleIDs ...string) (*Session, error) {
 	return nil, lastErr
 }
 
-// openHouseArrest opens the house_arrest service and vends bundleID's container,
-// trying each vend command until one succeeds.
-func openHouseArrest(device ios.DeviceEntry, bundleID string) (*afc.Client, error) {
+// openHouseArrest opens the house_arrest service and vends bundleID's
+// container, trying each vend command until one succeeds.
+func openHouseArrest(device ios.DeviceEntry, bundleID string) (*afc.Conn, error) {
 	var lastErr error
 	for _, cmd := range vendCommands {
-		client, err := vend(device, bundleID, cmd)
+		conn, err := afc.Vend(device, bundleID, cmd)
 		if err == nil {
-			return client, nil
+			return conn, nil
 		}
 		lastErr = err
 	}
@@ -161,42 +159,4 @@ func DetectSessions(udid string, bundleIDs []string) ([]*Session, error) {
 			closer:   client.Close,
 		}, nil
 	})
-}
-
-// vend issues a single house_arrest vend command on a fresh service connection.
-// On success the connection is owned by the returned afc.Client; on failure it
-// is closed before returning.
-func vend(device ios.DeviceEntry, bundleID, command string) (*afc.Client, error) {
-	conn, err := ios.ConnectToService(device, houseArrestService)
-	if err != nil {
-		return nil, fmt.Errorf("connect house_arrest: %w", err)
-	}
-	codec := ios.NewPlistCodec()
-	msg, err := codec.Encode(map[string]interface{}{"Command": command, "Identifier": bundleID})
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if err := conn.Send(msg); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	respBytes, err := codec.Decode(conn.Reader())
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	resp, err := ios.ParsePlist(respBytes)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if status, _ := resp["Status"].(string); status == "Complete" {
-		return afc.NewFromConn(conn), nil
-	}
-	conn.Close()
-	if e, _ := resp["Error"].(string); e != "" {
-		return nil, fmt.Errorf("%s: %s", command, e)
-	}
-	return nil, fmt.Errorf("%s: unexpected house_arrest response", command)
 }
