@@ -75,6 +75,23 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
+// Present reports whether a device with the given udid is currently attached
+// over USB. It is a cheap usbmux query that never touches AFC, so it stays
+// responsive even when an app's AFC connection has gone dead (e.g. the cable
+// was pulled) — which makes it a reliable disconnect/reconnect detector.
+func Present(udid string) (bool, error) {
+	list, err := ios.ListDevices()
+	if err != nil {
+		return false, fmt.Errorf("list devices: %w", err)
+	}
+	for _, d := range list.DeviceList {
+		if d.Properties.SerialNumber == udid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Connect resolves the target device (empty udid -> first device) and opens a
 // house_arrest AFC client, trying each bundleID in order until one vends
 // successfully (Lightroom uses a different bundle id on iPhone vs iPad). The

@@ -5,20 +5,15 @@
 package mountctl
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-// swappable in tests
-var (
-	statfsFn     = unix.Statfs
-	pollInterval = time.Second
-)
+// statfsFn is swappable in tests.
+var statfsFn = unix.Statfs
 
 // MountNFS mounts the localhost NFS server listening on port at mountpoint.
 // nolocks: go-nfs implements no NLM lock protocol. Default hard-mount
@@ -60,25 +55,6 @@ func IsMounted(mountpoint string) bool {
 		return false
 	}
 	return unix.ByteSliceToString(st.Fstypename[:]) == "nfs"
-}
-
-// WaitUnmount blocks until mountpoint stops being an NFS mount (Finder
-// eject) or ctx is cancelled. The macOS NFS client flushes all dirty pages
-// before an unmount can succeed, so returning nil here means every write
-// has been acknowledged by the AFC layer.
-func WaitUnmount(ctx context.Context, mountpoint string) error {
-	tick := time.NewTicker(pollInterval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tick.C:
-			if !IsMounted(mountpoint) {
-				return nil
-			}
-		}
-	}
 }
 
 // Unmount unmounts via diskutil, which performs the same flush as a Finder

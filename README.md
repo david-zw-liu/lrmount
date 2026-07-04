@@ -9,19 +9,25 @@ jailbreak, no kernel extensions, nothing to install.
 
 Running `lrmount`:
 
-1. Picks a connected USB device (auto if one, arrow-key menu if several).
+1. Picks a connected USB device (auto if one, arrow-key menu if several). If
+   none is attached, it waits for one to appear.
 2. Detects every installed Lightroom app (`com.adobe.lrmobilephone`, then
    `com.adobe.lrmobile`) and starts one embedded NFS server per app,
    bridging NFS operations straight to the device over AFC.
 3. Mounts each app's `Documents/` at `/Volumes/<device> Lightroom` with
    the built-in macOS NFS client. User presets live under
    `<catalog>/settings-acr/userStyles/` (paths are printed at startup).
-4. Waits. Eject a volume in Finder when you are done — macOS flushes every
-   pending write to the device before the eject completes. When the last
-   volume is ejected (or on Ctrl-C), lrmount exits.
+4. Stays running. lrmount is resident: unplug the cable and it auto-ejects
+   the volumes, then re-mounts them when you reconnect the device — it does
+   not exit. Eject a volume in Finder when you are done (macOS flushes every
+   pending write to the device before the eject completes). It exits only
+   when you eject every volume in Finder or press Ctrl-C.
 
 Writes are write-through: every file operation is acknowledged only after
-the device has confirmed it. There is no local cache to lose.
+the device has confirmed it. There is no local cache to lose — except writes
+the macOS NFS client had buffered but not yet sent when a cable is pulled;
+those are lost, which is inherent to unplugging. Eject in Finder for a clean
+flush.
 
 ## Requirements
 

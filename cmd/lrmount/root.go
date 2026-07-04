@@ -38,12 +38,13 @@ type volume struct {
 	hints        []string
 	mountpoint   string
 	ln           net.Listener
+	ejected      bool // set once this volume is torn down (single supervise goroutine)
 	shutdownOnce sync.Once
 }
 
 // shutdown closes the volume's NFS listener and removes its mountpoint dir.
-// Both the eject watcher and the Ctrl-C unmount path may reach this; Once
-// makes the two paths safe against each other.
+// The supervise loop is single-goroutine so this is never actually reentered;
+// shutdownOnce is cheap defense-in-depth.
 func (v *volume) shutdown() {
 	v.shutdownOnce.Do(func() {
 		v.ln.Close()
@@ -51,65 +52,141 @@ func (v *volume) shutdown() {
 	})
 }
 
+// genOutcome is how one mount "generation" (the volumes for one continuous
+// span of device connectivity) ended.
+type genOutcome int
+
+const (
+	genDisconnected genOutcome = iota // cable pulled / device gone → wait for reconnect
+	genAllEjected                     // every volume ejected in Finder → exit
+	genCtrlC                          // interrupt → exit
+)
+
 func run() error {
-	// 1. Pick device.
-	infos, err := device.List()
-	if err != nil {
-		return err
-	}
-	if len(infos) == 0 {
-		return fmt.Errorf("no USB device found; connect and trust your device")
-	}
-	chosen := infos[0]
-	if len(infos) > 1 {
-		labels := make([]string, len(infos))
-		for i, d := range infos {
-			labels[i] = fmt.Sprintf("%s  (%s, iOS %s, %s)", d.Name, d.ProductType, d.Version, d.UDID)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	fmt.Print(warningBanner())
+
+	// Resident supervise loop. lrmount never exits merely because no device
+	// is attached: it waits for one to appear, mounts its volumes, and keeps
+	// running across unplug/replug. It exits only when the user ejects every
+	// volume in Finder or presses Ctrl-C.
+	var chosenUDID, chosenName string
+	for {
+		// Resolve a device to work with. Empty udid means we have not picked
+		// one yet (startup, or after all volumes were ejected on a prior
+		// device); otherwise wait for the chosen device to (re)appear.
+		if chosenUDID == "" {
+			info, ok := waitAndPickDevice(ctx)
+			if !ok {
+				break // Ctrl-C
+			}
+			chosenUDID, chosenName = info.UDID, info.Name
+		} else if present, _ := device.Present(chosenUDID); !present {
+			fmt.Fprintln(os.Stderr, "\nWaiting for the device to reconnect… (Ctrl-C to quit)")
+			if !waitForReconnect(ctx, chosenUDID) {
+				break // Ctrl-C
+			}
+			fmt.Fprintln(os.Stderr, "Device reconnected — remounting…")
 		}
-		idx, err := pickIndex("Select a device", labels)
+
+		sessions, err := device.DetectSessions(chosenUDID, lightroomBundleIDs)
 		if err != nil {
-			return err
+			// Device present but not ready (locked, still settling after
+			// replug, or Lightroom not installed). Retry; never fatal.
+			fmt.Fprintf(os.Stderr, "detecting Lightroom: %v — retrying…\n", err)
+			if !sleepOrDone(ctx, 2*time.Second) {
+				break
+			}
+			continue
 		}
-		chosen = infos[idx]
+
+		mounted := mountVolumes(sessions, chosenName)
+		if len(mounted) == 0 {
+			closeSessions(sessions)
+			fmt.Fprintln(os.Stderr, "no Lightroom app with a usable Documents folder — retrying…")
+			if !sleepOrDone(ctx, 3*time.Second) {
+				break
+			}
+			continue
+		}
+		fmt.Println("\nEdit presets in Finder. Eject a volume when done, or press Ctrl-C.")
+		fmt.Println("Unplugging the cable auto-ejects and re-mounts when you reconnect.")
+
+		outcome := superviseGeneration(ctx, chosenUDID, mounted)
+		closeSessions(sessions)
+		switch outcome {
+		case genDisconnected:
+			// Keep the chosen udid and loop back to wait for reconnect.
+			continue
+		case genAllEjected:
+			// User is done with this device; forget it and wait for the next
+			// one instead of exiting.
+			fmt.Fprintln(os.Stderr, "\nAll volumes ejected. Waiting for a device… (Ctrl-C to quit)")
+			chosenUDID, chosenName = "", ""
+			continue
+		case genCtrlC:
+			return nil
+		}
 	}
 
-	// 2. Open a session per installed Lightroom app.
-	sessions, err := device.DetectSessions(chosen.UDID, lightroomBundleIDs)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		for _, s := range sessions {
-			s.Close()
+	return nil
+}
+
+// waitAndPickDevice blocks until at least one device is attached, then returns
+// it (prompting a menu when several are present). It reports false only on
+// Ctrl-C. The "waiting" notice is printed once, not every poll.
+func waitAndPickDevice(ctx context.Context) (device.Info, bool) {
+	announced := false
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		infos, err := device.List()
+		if err == nil && len(infos) > 0 {
+			if len(infos) == 1 {
+				return infos[0], true
+			}
+			labels := make([]string, len(infos))
+			for i, d := range infos {
+				labels[i] = fmt.Sprintf("%s  (%s, iOS %s, %s)", d.Name, d.ProductType, d.Version, d.UDID)
+			}
+			idx, err := pickIndex("Select a device", labels)
+			if err != nil {
+				return device.Info{}, false
+			}
+			return infos[idx], true
 		}
-	}()
+		if !announced {
+			fmt.Println("Waiting for a USB device… connect and trust it. (Ctrl-C to quit)")
+			announced = true
+		}
+		select {
+		case <-ctx.Done():
+			return device.Info{}, false
+		case <-tick.C:
+		}
+	}
+}
+
+// mountVolumes opens an NFS server and Finder mount for each Lightroom app in
+// sessions. A per-volume failure is reported and skipped; the returned slice
+// holds only the volumes that mounted.
+func mountVolumes(sessions []*device.Session, deviceName string) []*volume {
 	multi := len(sessions) > 1
-
-	// 3. Build volume descriptions.
-	var vols []*volume
+	var mounted []*volume
 	for _, s := range sessions {
 		docs, err := locate.DocumentsRoot(s.FS, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] skipped: %v\n", s.BundleID, err)
 			continue
 		}
-		v := &volume{sess: s, root: docs, name: volumeName(chosen.Name, s.BundleID, multi)}
+		v := &volume{sess: s, root: docs, name: volumeName(deviceName, s.BundleID, multi)}
 		if cands, err := locate.FindCatalogs(s.FS, docs); err == nil {
 			for _, c := range cands {
 				v.hints = append(v.hints, c.UserStyles)
 			}
 		}
-		vols = append(vols, v)
-	}
-	if len(vols) == 0 {
-		return fmt.Errorf("no Lightroom app with a usable Documents folder found")
-	}
-
-	fmt.Print(warningBanner())
-
-	// 4. Serve + mount every volume; failures skip that volume only.
-	var mounted []*volume
-	for _, v := range vols {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] listen: %v\n", v.name, err)
@@ -141,75 +218,118 @@ func run() error {
 			fmt.Printf("  presets: %s\n", hintPath(mp, v.root, h))
 		}
 	}
-	if len(mounted) == 0 {
-		return fmt.Errorf("all volumes failed to mount")
-	}
-	fmt.Println("\nEject the volume(s) in Finder when done, or press Ctrl-C.")
-
-	// 5. Wait for ejects; Ctrl-C unmounts what is left.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	var wg sync.WaitGroup
-	for _, v := range mounted {
-		wg.Add(1)
-		go func(v *volume) {
-			defer wg.Done()
-			if err := mountctl.WaitUnmount(ctx, v.mountpoint); err != nil {
-				return // Ctrl-C: main unmounts below
-			}
-			fmt.Printf("ejected  %s\n", v.mountpoint)
-			v.shutdown()
-		}(v)
-		go watchDevice(ctx, v)
-	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-
-	select {
-	case <-done: // every volume ejected in Finder
-	case <-ctx.Done(): // Ctrl-C
-		fmt.Println("\nunmounting…")
-		force := make(chan os.Signal, 1)
-		signal.Notify(force, os.Interrupt)
-		defer signal.Stop(force)
-		for _, v := range mounted {
-			unmountWithRetry(v, force)
-		}
-		wg.Wait()
-	}
-
-	fmt.Println("\nAll volumes ejected. Reopen Lightroom so it rebuilds its preset index.")
-	return nil
+	return mounted
 }
 
-// watchDevice force-ejects the volume when its AFC connection dies (cable
-// unplugged, device rebooted). It probes the connection with a cheap
-// DeviceInfo round trip; any error is fatal because AFC sessions cannot
-// reconnect. The force unmount makes WaitUnmount return, which drives the
-// normal eject/shutdown path — when the last volume goes, the process exits.
-// Data still buffered by the NFS client at unplug time is lost; that is the
-// nature of pulling the cable, and a graceful flush is impossible with the
-// device gone.
-func watchDevice(ctx context.Context, v *volume) {
-	tick := time.NewTicker(2 * time.Second)
+// superviseGeneration runs a single connectivity generation from one
+// goroutine: it polls (a) device presence over usbmux — which never hangs on
+// a dead AFC socket — and (b) each volume's mount state, so a Finder eject is
+// noticed and cleaned up. It returns when the device vanishes, when every
+// volume has been ejected, or on Ctrl-C.
+func superviseGeneration(ctx context.Context, udid string, mounted []*volume) genOutcome {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	// A single missed presence poll can be a usbmux hiccup rather than an
+	// unplug; require two consecutive confirmed absences before force-ejecting
+	// (which discards buffered writes), so a transient blip doesn't tear down
+	// a healthy mount.
+	absences := 0
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nunmounting…")
+			force := make(chan os.Signal, 1)
+			signal.Notify(force, os.Interrupt)
+			defer signal.Stop(force)
+			for _, v := range mounted {
+				if !v.ejected {
+					unmountWithRetry(v, force)
+					v.ejected = true
+				}
+			}
+			return genCtrlC
+		case <-tick.C:
+			// Device gone → force-eject every volume promptly (which also
+			// clears macOS's "server not responding" state) and report the
+			// disconnect so the caller waits for a reconnect. A usbmux query
+			// error is treated as "unknown", not a disconnect.
+			if present, err := device.Present(udid); err == nil && !present {
+				if absences++; absences < 2 {
+					continue
+				}
+				for _, v := range mounted {
+					forceEject(v)
+				}
+				return genDisconnected
+			}
+			absences = 0
+			allEjected := true
+			for _, v := range mounted {
+				if v.ejected {
+					continue
+				}
+				if mountctl.IsMounted(v.mountpoint) {
+					allEjected = false
+					continue
+				}
+				v.ejected = true
+				fmt.Printf("ejected  %s\n", v.mountpoint)
+				v.shutdown()
+			}
+			if allEjected {
+				return genAllEjected
+			}
+		}
+	}
+}
+
+// forceEject tears a volume down without a graceful flush — used when the
+// device is already gone, so there is nothing to flush to. Data the NFS
+// client had buffered but not yet written is lost; that is inherent to
+// pulling the cable.
+func forceEject(v *volume) {
+	if v.ejected {
+		return
+	}
+	v.ejected = true
+	if mountctl.IsMounted(v.mountpoint) {
+		if err := mountctl.Unmount(v.mountpoint, true); err != nil {
+			fmt.Fprintf(os.Stderr, "force unmount %s: %v\n", v.mountpoint, err)
+		}
+	}
+	v.shutdown()
+}
+
+// waitForReconnect blocks until the device reappears over usbmux or ctx is
+// cancelled; it reports false only on cancellation (Ctrl-C).
+func waitForReconnect(ctx context.Context, udid string) bool {
+	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-tick.C:
-			if !mountctl.IsMounted(v.mountpoint) {
-				return // ejected normally
-			}
-			if _, _, err := v.sess.FS.DeviceInfo(); err != nil {
-				fmt.Fprintf(os.Stderr, "\n%s: device disconnected — force ejecting %s\n", v.name, v.mountpoint)
-				if err := mountctl.Unmount(v.mountpoint, true); err != nil {
-					fmt.Fprintf(os.Stderr, "force unmount %s: %v\n", v.mountpoint, err)
-				}
-				return
+			if present, _ := device.Present(udid); present {
+				return true
 			}
 		}
+	}
+}
+
+// sleepOrDone waits for d or ctx cancellation; false means cancelled.
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
+func closeSessions(sessions []*device.Session) {
+	for _, s := range sessions {
+		s.Close()
 	}
 }
 
