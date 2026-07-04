@@ -66,8 +66,8 @@ func run() error {
 
 	fmt.Print(warningBanner())
 	fmt.Println("Mounting every USB-connected device (Wi-Fi devices are ignored).")
-	fmt.Println("Devices mount automatically. Eject in Finder to finish (unmounts all and quits);")
-	fmt.Println("unplugging a device ejects it but keeps lrmount running. Ctrl-C also quits.")
+	fmt.Println("Eject a device in Finder to unmount just that one; lrmount quits when the last")
+	fmt.Println("is ejected. Unplugging a device ejects it but keeps running. Ctrl-C also quits.")
 
 	// Resident daemon keyed by udid. Each tick reconciles the mounted set
 	// against the USB devices usbmuxd reports.
@@ -92,11 +92,11 @@ func run() error {
 				present[d.UDID] = d
 			}
 			reconcileGone(mounts, warned, present)
-			if reconcileEjected(mounts) {
-				// A Finder eject of a still-connected device means the user is
-				// done: unmount whatever is left and quit. (An unplug leaves
-				// the mount in the table and is handled by reconcileGone, so it
-				// stays resident instead.)
+			// A Finder eject unmounts just that device. When it was the last
+			// one still mounted, the user is done, so quit; otherwise keep
+			// serving the rest. (An unplug leaves the mount in the table and
+			// is handled by reconcileGone, so it stays resident instead.)
+			if reconcileEjected(mounts) && activeMounts(mounts) == 0 {
 				shutdownAll(mounts)
 				fmt.Println("\nDone. Reopen Lightroom so it rebuilds its preset index.")
 				return nil
@@ -121,6 +121,17 @@ func reconcileGone(mounts map[string]*deviceMount, warned map[string]bool, prese
 		delete(mounts, udid)
 		delete(warned, udid)
 	}
+}
+
+// activeMounts counts devices still serving a mounted volume (not yet ejected).
+func activeMounts(mounts map[string]*deviceMount) int {
+	n := 0
+	for _, dm := range mounts {
+		if !dm.ejected {
+			n++
+		}
+	}
+	return n
 }
 
 // reconcileEjected tears down the server of any still-connected device whose
