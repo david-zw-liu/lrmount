@@ -117,15 +117,13 @@ func run() error {
 		closeSessions(sessions)
 		switch outcome {
 		case genDisconnected:
-			// Keep the chosen udid and loop back to wait for reconnect.
+			// Cable pulled: stay resident and loop back to wait for reconnect.
 			continue
-		case genAllEjected:
-			// User is done with this device; forget it and wait for the next
-			// one instead of exiting.
-			fmt.Fprintln(os.Stderr, "\nAll volumes ejected. Waiting for a device… (Ctrl-C to quit)")
-			chosenUDID, chosenName = "", ""
-			continue
-		case genCtrlC:
+		case genAllEjected, genCtrlC:
+			// Ejecting in Finder (the volume or the "localhost" server) or
+			// Ctrl-C means the user is done: the volumes are already torn
+			// down, so exit.
+			fmt.Println("\nEjected. Reopen Lightroom so it rebuilds its preset index.")
 			return nil
 		}
 	}
