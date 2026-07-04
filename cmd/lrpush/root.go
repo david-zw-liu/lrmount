@@ -32,12 +32,23 @@ var rootCmd = &cobra.Command{
 func Execute() error { return rootCmd.Execute() }
 
 type volume struct {
-	sess       *device.Session
-	name       string
-	root       string // Documents root on the device
-	hints      []string
-	mountpoint string
-	ln         net.Listener
+	sess         *device.Session
+	name         string
+	root         string // Documents root on the device
+	hints        []string
+	mountpoint   string
+	ln           net.Listener
+	shutdownOnce sync.Once
+}
+
+// shutdown closes the volume's NFS listener and removes its mountpoint dir.
+// Both the eject watcher and the Ctrl-C unmount path may reach this; Once
+// makes the two paths safe against each other.
+func (v *volume) shutdown() {
+	v.shutdownOnce.Do(func() {
+		v.ln.Close()
+		mountctl.Cleanup(v.mountpoint)
+	})
 }
 
 func run() error {
@@ -148,8 +159,7 @@ func run() error {
 				return // Ctrl-C: main unmounts below
 			}
 			fmt.Printf("ejected  %s\n", v.mountpoint)
-			v.ln.Close()
-			mountctl.Cleanup(v.mountpoint)
+			v.shutdown()
 		}(v)
 	}
 	done := make(chan struct{})
@@ -176,8 +186,7 @@ func run() error {
 // Finder eject); a second Ctrl-C escalates to a forced unmount.
 func unmountWithRetry(v *volume, force <-chan os.Signal) {
 	defer func() {
-		v.ln.Close()
-		mountctl.Cleanup(v.mountpoint)
+		v.shutdown()
 	}()
 	for mountctl.IsMounted(v.mountpoint) {
 		err := mountctl.Unmount(v.mountpoint, false)
