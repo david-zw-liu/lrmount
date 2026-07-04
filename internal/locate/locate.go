@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 func join(parts ...string) string {

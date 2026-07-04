@@ -6,8 +6,8 @@ import (
 
 	"github.com/danielpaulus/go-ios/ios"
 
-	"github.com/davidliu/lrpush/internal/afc"
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afc"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 // vendCommands are tried in order. Lightroom is a file-sharing app

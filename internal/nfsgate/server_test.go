@@ -10,7 +10,7 @@ import (
 	rpc "github.com/willscott/go-nfs-client/nfs/rpc"
 	xdr "github.com/willscott/go-nfs-client/nfs/xdr"
 
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 func startServer(t *testing.T) (*afcfs.MemFS, *nfsc.Target) {

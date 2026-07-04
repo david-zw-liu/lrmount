@@ -1,5 +1,5 @@
-BINARY := lrpush
-PKG := ./cmd/lrpush
+BINARY := lrmount
+PKG := ./cmd/lrmount
 
 .PHONY: build test vet fmt clean
 

@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/davidliu/lrpush/internal/device"
-	"github.com/davidliu/lrpush/internal/locate"
-	"github.com/davidliu/lrpush/internal/mountctl"
-	"github.com/davidliu/lrpush/internal/nfsgate"
+	"github.com/david-zw-liu/lrmount/internal/device"
+	"github.com/david-zw-liu/lrmount/internal/locate"
+	"github.com/david-zw-liu/lrmount/internal/mountctl"
+	"github.com/david-zw-liu/lrmount/internal/nfsgate"
 )
 
 // lightroomBundleIDs are probed in order; the iPhone app comes first.

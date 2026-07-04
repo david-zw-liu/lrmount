@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 // rootUnlistableFS wraps a MemFS but fails List("") the way a house_arrest

@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/davidliu/lrpush/internal/afc"
+	"github.com/david-zw-liu/lrmount/internal/afc"
 )
 
 // FileInfo is the subset of stat data lrmount needs.

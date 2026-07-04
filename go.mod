@@ -1,4 +1,4 @@
-module github.com/davidliu/lrpush
+module github.com/david-zw-liu/lrmount
 
 go 1.26.4
 

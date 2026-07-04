@@ -1,8 +1,5 @@
-# Ephemeral local mirror (wiped at the start of every run)
-/sync/
-
 # built binary
-/lrpush
+/lrmount
 
 # SDD controller scratch (ledger, briefs, review packages)
 /.superpowers/

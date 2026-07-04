@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/davidliu/lrpush/internal/mountctl"
+	"github.com/david-zw-liu/lrmount/internal/mountctl"
 )
 
 // volumeName builds the Finder volume name for one (device, app) pair.

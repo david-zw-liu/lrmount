@@ -9,7 +9,7 @@ import (
 	nfs "github.com/willscott/go-nfs"
 	nfshelper "github.com/willscott/go-nfs/helpers"
 
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 // handleCacheSize bounds the NFS file-handle LRU. Evicting a live handle

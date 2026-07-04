@@ -1,63 +1,65 @@
-# lrpush
+# lrmount
 
-Mirror an iPhone/iPad Adobe Lightroom app's user presets (styles) to a local
-folder over USB, then live-sync your local edits back to the device — using
-Apple house_arrest + AFC via [go-ios](https://github.com/danielpaulus/go-ios).
-No jailbreak, no tunnel.
+Mount an iPhone/iPad Adobe Lightroom app's `Documents/` folder as an
+ejectable volume in Finder, over USB — using Apple house_arrest + AFC via
+an embedded localhost NFS server and macOS's built-in NFS client. No
+jailbreak, no kernel extensions, nothing to install.
 
 ## How it works
 
-Lightroom mobile stores user presets inside its app container at
-`Documents/{catalog}/settings-acr/userStyles/`. Running `lrpush`:
+Running `lrmount`:
 
-1. Picks a connected device (auto if one, arrow-key menu if several).
-2. Detects every installed Lightroom app (probing `com.adobe.lrmobilephone`
-   then `com.adobe.lrmobile`) and mirrors each one.
-3. Pulls the device's `userStyles` down into `./sync/{bundle-id}/userStyles/`,
-   replacing anything there.
-4. Watches that local folder and pushes any change — new files, edits, and
-   deletions — back to the device in real time until you press Ctrl-C.
+1. Picks a connected USB device (auto if one, arrow-key menu if several).
+2. Detects every installed Lightroom app (`com.adobe.lrmobilephone`, then
+   `com.adobe.lrmobile`) and starts one embedded NFS server per app,
+   bridging NFS operations straight to the device over AFC.
+3. Mounts each app's `Documents/` at `/Volumes/<device> Lightroom` with
+   the built-in macOS NFS client. User presets live under
+   `<catalog>/settings-acr/userStyles/` (paths are printed at startup).
+4. Waits. Eject a volume in Finder when you are done — macOS flushes every
+   pending write to the device before the eject completes. When the last
+   volume is ejected (or on Ctrl-C), lrmount exits.
 
-`./sync/` is an ephemeral working copy: it is wiped at the start of every run
-and left on disk afterward for review.
+Writes are write-through: every file operation is acknowledged only after
+the device has confirmed it. There is no local cache to lose.
 
 ## Requirements
 
 - macOS with the device connected via USB and **trusted**.
 - Go 1.26+ to build.
-- Dependencies: `github.com/danielpaulus/go-ios`, `github.com/spf13/cobra`,
-  `github.com/charmbracelet/huh`, `github.com/fsnotify/fsnotify`,
-  `golang.org/x/term`.
 
 ## Build
 
-    make build        # produces ./lrpush
-    # or: go build -o lrpush ./cmd/lrpush
+    make build        # produces ./lrmount
+    # or: go build -o lrmount ./cmd/lrmount
 
 ## Use
 
-    ./lrpush
+    ./lrmount
 
-Pick a device if prompted, pick a catalog if prompted, then **fully close
-Lightroom** when the banner appears. Edit presets under the printed
-`./sync/{bundle-id}/userStyles/` path; every change syncs to the device. Press
-Ctrl-C to stop, then reopen Lightroom so it rebuilds its preset index.
+Pick a device if prompted, then **fully close Lightroom** on the device
+(swipe it away in the app switcher) while volumes are mounted. Edit presets
+in Finder under the printed paths. Eject in Finder when done, then reopen
+Lightroom so it rebuilds its preset index.
 
 ### Safety
 
-- Deletions mirror: removing a file/folder under `./sync/...` deletes it on the
-  device. There are no backups.
-- Close Lightroom while syncing; reopen it afterward.
-- Presets pushed this way may appear only on the device and may not sync to
-  Creative Cloud.
+- Deletions and edits act directly on the device. There are no backups.
+- Close Lightroom while volumes are mounted; reopen it after ejecting.
+- Finder writes `.DS_Store` / `._*` files onto the device; Lightroom
+  ignores them.
+- Presets pushed this way may appear only on the device and may not sync
+  to Creative Cloud.
 
 ## Troubleshooting
 
-**No device found:** connect via USB, unlock, and accept "Trust This Computer".
+**No device found:** connect via USB, unlock, and accept "Trust This
+Computer".
 
 **Lightroom not found:** the app must be installed and expose file sharing.
-lrpush recognises `com.adobe.lrmobilephone` (iPhone) and `com.adobe.lrmobile`
-(iPad/universal).
 
-**Changes don't appear in Lightroom:** fully close and reopen it so it re-reads
-its preset index.
+**Mount fails with a permission error:** some configurations require a
+reserved source port; see the `resvport` note in `internal/mountctl`.
+
+**Volume shows as full:** the free-space numbers come from the device;
+reconnect and rerun if they look stale.

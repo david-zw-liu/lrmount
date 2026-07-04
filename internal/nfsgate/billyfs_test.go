@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-git/go-billy/v5"
 
-	"github.com/davidliu/lrpush/internal/afcfs"
+	"github.com/david-zw-liu/lrmount/internal/afcfs"
 )
 
 func newFS(t *testing.T) (*afcfs.MemFS, *BillyFS) {
