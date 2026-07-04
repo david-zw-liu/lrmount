@@ -9,6 +9,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/willscott/go-nfs v0.0.4
 	github.com/willscott/go-nfs-client v0.0.0-20251022144359-801f10d98886
+	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 )
 
@@ -50,7 +51,6 @@ require (
 	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 	howett.net/plist v1.0.1 // indirect
