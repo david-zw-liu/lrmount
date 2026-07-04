@@ -40,15 +40,16 @@ func hintPath(mountpoint, app, root, devicePath string) string {
 	return filepath.Join(mountpoint, app, rel)
 }
 
-// mountpointFor returns the mount directory ~/lrmount/{device}, creating the
-// parent hierarchy. A live mount already there (leftover from a prior run)
-// gets a numeric suffix so we never mount two volumes on one dir.
+// mountBase is where volumes are mounted. It lives under /tmp because a
+// mountpoint is throwaway scratch — the actual data is on the device, and the
+// Finder volume name comes from the NFS share, not this path.
+const mountBase = "/tmp/lrmount"
+
+// mountpointFor returns the mount directory /tmp/lrmount/{device}, creating
+// the parent hierarchy. A live mount already there (leftover from a prior
+// run) gets a numeric suffix so we never mount two volumes on one dir.
 func mountpointFor(deviceName string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "", fmt.Errorf("cannot resolve home directory: %w", err)
-	}
-	base := filepath.Join(home, "lrmount")
+	base := mountBase
 	for i := 1; i <= 9; i++ {
 		leaf := sanitizeSeg(deviceName)
 		if i > 1 {
