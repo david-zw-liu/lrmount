@@ -74,7 +74,7 @@ func run() error {
 	mounts := map[string]*deviceMount{}
 	warned := map[string]bool{} // suppress repeated mount-failure logs per device
 
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
