@@ -128,7 +128,7 @@ func run() error {
 			continue
 		}
 		port := ln.Addr().(*net.TCPAddr).Port
-		if err := mountctl.MountNFS(mp, port); err != nil {
+		if err := mountctl.MountNFS(mp, v.name, port); err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] %v\n", v.name, err)
 			ln.Close()
 			mountctl.Cleanup(mp)

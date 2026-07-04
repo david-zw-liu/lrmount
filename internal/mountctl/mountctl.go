@@ -25,20 +25,27 @@ var (
 // semantics are kept deliberately: transient stalls retry instead of
 // dropping writes.
 //
+// share becomes the path component of the mount source
+// ("localhost:/<share>"). Finder derives the volume's displayed name from
+// that path, so passing the volume name here is what makes Finder show
+// "David's iPhone Lightroom" instead of "localhost". The NFS server ignores
+// the mount dirpath, so any string works.
+//
 // Some macOS configurations refuse to bind the NFS client to a
 // non-reserved (>1024) source port, causing the initial mount to fail.
 // Rather than requiring the user to diagnose and add "resvport" by hand,
 // retry once with it added: this keeps the tool zero-config for the
 // common case while still working on stricter setups.
-func MountNFS(mountpoint string, port int) error {
+func MountNFS(mountpoint, share string, port int) error {
+	source := "localhost:/" + share
 	opts := fmt.Sprintf("port=%d,mountport=%d,tcp,vers=3,nolocks", port, port)
-	out, err := exec.Command("/sbin/mount", "-t", "nfs", "-o", opts, "localhost:/", mountpoint).CombinedOutput()
+	out, err := exec.Command("/sbin/mount", "-t", "nfs", "-o", opts, source, mountpoint).CombinedOutput()
 	if err == nil {
 		return nil
 	}
 
 	retryOpts := opts + ",resvport"
-	retryOut, retryErr := exec.Command("/sbin/mount", "-t", "nfs", "-o", retryOpts, "localhost:/", mountpoint).CombinedOutput()
+	retryOut, retryErr := exec.Command("/sbin/mount", "-t", "nfs", "-o", retryOpts, source, mountpoint).CombinedOutput()
 	if retryErr == nil {
 		return nil
 	}

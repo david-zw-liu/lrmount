@@ -38,6 +38,12 @@ func (h *handler) FSStat(ctx context.Context, f billy.Filesystem, s *nfs.FSStat)
 
 // Serve answers MOUNT and NFSv3 for fs (rooted at root) on l until l closes.
 func Serve(l net.Listener, fs afcfs.FS, root string) error {
+	// The macOS client probes features the server doesn't implement
+	// (e.g. exclusive CREATE) and falls back cleanly, but go-nfs logs each
+	// probe as a scary ERROR line. Nothing go-nfs logs is actionable for
+	// users — real failures surface as NFS errors in Finder and as our own
+	// messages — so silence everything short of a panic.
+	nfs.Log.SetLevel(nfs.PanicLevel)
 	bfs := NewBillyFS(fs, root)
 	h := &handler{Handler: nfshelper.NewNullAuthHandler(bfs), fs: fs}
 	return nfs.Serve(l, nfshelper.NewCachingHandler(h, handleCacheSize))
